@@ -23,6 +23,7 @@ echo '<h1>Hello</h1>' | tinyview
 - **Ephemeral Runtime**: ウィンドウを閉じたら DOM / JS state / 生成HTML / session を全破棄。デフォルトで永続状態を持たない
 - **Native WebView**: Chromium 同梱禁止。macOS=WKWebView / Windows=WebView2 / Linux=WebKitGTK を使う
 - **CLI First**: GUI設定画面やタブUIを持たない
+- **Non-blocking CLI**: launch 後ただちに shell に制御を返す（`open file.png` と同じ挙動）。`--foreground` 明示時のみ前景維持。stdin/file/template の検証は親プロセスで済ませてから fork/detach する
 
 ## 最重要 KPI: 起動速度
 
@@ -56,9 +57,11 @@ raw path（`echo '<h1>x</h1>' | tinyview`）のターゲット:
 
 ```
 Rust + wry + tao
++ clap (default-features = false)
++ serde / toml / serde_json
 ```
 
-別言語・別フレームワークを提案する場合は、起動速度ターゲットとバイナリサイズ <10MB をどう満たすか必ず説明する。
+別言語・別フレームワークを提案する場合は、起動速度ターゲットとバイナリサイズ <10MB をどう満たすか必ず説明する。Template engine (minijinja / tera / handlebars 等) は採用しない — 仕様上不要。
 
 ## 入力解決の優先順位
 
@@ -78,8 +81,16 @@ Rust + wry + tao
 ## Config
 
 - Root: `~/.tinyview/`（将来 `$XDG_CONFIG_HOME/tinyview/` 対応検討）
-- `config.toml` + `templates/<name>/{template.toml, template.html, ...}` 構成
+- `config.toml` + `templates/<name>.html`（自己完結した単一HTML）の構成
 - 詳細は `docs/PRD.md` §11–§15
+
+## Template Contract
+
+- TinyView は template engine を持たない。**`str::replace` 1回**だけ
+- Template の `<head>` に `<script>window.__TINYVIEW__ = /*__TINYVIEW__*/ null /*__TINYVIEW__*/;</script>` を置き、runtime が JSON literal で置換する
+- 注入される値: `{ input, params, title, path }`
+- HTML escape / library 同梱 / 描画ロジックはすべて template 側 JS の責任
+- 外部リソース参照 (`<link href>` / `<script src>`) は no server 原則により禁止
 
 ## MVP スコープ
 
