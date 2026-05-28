@@ -1,0 +1,106 @@
+# CLAUDE.md
+
+このリポジトリで作業する際の指針。詳細仕様は `docs/PRD.md` を参照。
+
+## プロダクト概要
+
+**TinyView** は CLI から即座に Web UI を表示する一時実行型プレビューランタイム。
+
+```bash
+echo '<h1>Hello</h1>' | tinyview
+```
+
+サーバー・ポート・一時HTMLファイル生成なしで、ネイティブ WebView 上に描画し、閉じたら状態は全て破棄される。位置付けは「軽量ブラウザ」ではなく `ephemeral rendering primitive`。
+
+## 絶対条件（破ってはならない原則）
+
+実装提案・コードレビュー時は常にこれらに反していないかチェックする。
+
+- **No Server**: localhost / port listen / dev server / background HTTP server / hidden proxy のいずれも禁止
+- **No Port**: ユーザーにポート番号を意識させない
+- **No Generated Preview File**: プレビュー実行のための一時HTMLを書き出さない（入力はメモリ上で単一HTML文字列に合成し WebView へ注入）
+  - ユーザー指定の入力ファイル / dotfile config / template ファイルの読み込みは可
+- **Ephemeral Runtime**: ウィンドウを閉じたら DOM / JS state / 生成HTML / session を全破棄。デフォルトで永続状態を持たない
+- **Native WebView**: Chromium 同梱禁止。macOS=WKWebView / Windows=WebView2 / Linux=WebKitGTK を使う
+- **CLI First**: GUI設定画面やタブUIを持たない
+
+## 最重要 KPI: 起動速度
+
+優先順位は固定:
+
+1. 起動速度
+2. 初回描画速度
+3. メモリ使用量
+4. 操作レスポンス
+5. 拡張性
+6. 機能量
+
+raw path（`echo '<h1>x</h1>' | tinyview`）のターゲット:
+
+| Metric      | Target |
+| ----------- | ------ |
+| startup     | <150ms |
+| first paint | <200ms |
+| idle memory | <50MB  |
+| binary size | <10MB  |
+
+**起動を遅くする機能は core に入れない。** template / plugin / optional に外出しする。
+
+## Core に入れて良いもの / いけないもの
+
+**Core OK:** stdin reader / config loader / template resolver / native WebView launcher
+
+**Core NG:** embedded Chromium / Node.js runtime / npm 統合 / TypeScript compiler / React compiler / heavy preload / background daemon / localhost server
+
+## 推奨スタック
+
+```
+Rust + wry + tao
+```
+
+別言語・別フレームワークを提案する場合は、起動速度ターゲットとバイナリサイズ <10MB をどう満たすか必ず説明する。
+
+## 入力解決の優先順位
+
+1. stdin（存在すれば最優先）
+2. ファイル path 引数
+3. `--html` インライン
+
+## Template 解決の優先順位
+
+1. 明示指定 `--template` / `-t`
+2. 拡張子マッピング（config の `[extension]`）
+3. `default_template`
+4. `raw`
+
+最終的に必ず**単一HTML文字列**にコンパイルしてから WebView に渡す。
+
+## Config
+
+- Root: `~/.tinyview/`（将来 `$XDG_CONFIG_HOME/tinyview/` 対応検討）
+- `config.toml` + `templates/<name>/{template.toml, template.html, ...}` 構成
+- 詳細は `docs/PRD.md` §11–§15
+
+## MVP スコープ
+
+**含む:** stdin / file / inline HTML 入力、raw 描画、native WebView、memory injection、config.toml、template runtime
+
+**含まない:** React/Vue build、TS transpile、npm install、HMR、tabs、GUI設定、background daemon
+
+## セキュリティデフォルト
+
+JS から native bridge / shell exec / filesystem / Node API は提供しない。必要な場合のみ `--allow-fetch` / `--allow-clipboard` / `--allow-storage` で明示許可。
+
+## 作業時のチェックリスト
+
+新機能・依存追加・アーキテクチャ変更を提案する前に:
+
+- [ ] 起動速度ターゲット（<150ms）を悪化させないか
+- [ ] バイナリサイズ <10MB を壊さないか
+- [ ] No Server / No Port / No Generated Preview File に反していないか
+- [ ] core ではなく template / plugin に外出しできないか
+- [ ] 永続状態を持ち込んでいないか（ephemeral 原則）
+
+## ドキュメント
+
+- `docs/PRD.md` — Single source of truth。仕様の解釈に迷ったら必ず参照
