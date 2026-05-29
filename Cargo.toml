@@ -1,0 +1,23 @@
+[package]
+name = "tinyview"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Ephemeral CLI WebView runtime"
+license = "MIT"
+
+[[bin]]
+name = "tinyview"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+wry = "0.55"
+tao = "0.35"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
