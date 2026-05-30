@@ -1,0 +1,75 @@
+name: Release
+
+# Publish to crates.io on a version tag push (e.g. `git tag v0.1.0 && git push --tags`).
+# A published crate version is immutable (yank hides it but never frees the
+# number), so this workflow is deliberately the ONLY automated publish path and
+# guards the tag against Cargo.toml before the irreversible upload.
+on:
+  push:
+    tags:
+      - "v*"
+
+# Never run two publishes for the same tag concurrently; do NOT cancel an
+# in-flight publish — an interrupted upload could leave a half-published version.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  publish:
+    name: publish to crates.io
+    runs-on: ubuntu-latest
+    # Only the canonical repo publishes — a fork pushing a tag must not attempt
+    # an upload (it would fail on a missing token, but fail fast and explicitly).
+    if: github.repository == 'TakakiAraki09/tiny-view'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry / target
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-publish
+
+      # `cargo publish` compiles + verifies the package on the runner, so the
+      # native-WebView (wry) Linux system deps must be present — same set as the
+      # CI `test` / `release-build` jobs.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      # Guard: the pushed tag (vX.Y.Z) must equal Cargo.toml's `version`.
+      # crates.io rejects a re-published version and the number can never be
+      # reused, so catch a mismatch BEFORE the irreversible upload.
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          echo "tag=${TAG} cargo=${CARGO_VERSION}"
+          if [ "${TAG}" != "${CARGO_VERSION}" ]; then
+            echo "::error::pushed tag v${TAG} does not match Cargo.toml version ${CARGO_VERSION}"
+            exit 1
+          fi
+
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish
