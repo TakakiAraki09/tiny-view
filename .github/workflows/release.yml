@@ -1,60 +1,59 @@
 name: Release
 
-# Manual, one-click publish to crates.io. Trigger from the Actions tab (or
-# `gh workflow run Release -f version=X.Y.Z`) and the workflow bumps the version,
-# syncs the lockfile, publishes, and only then records the release commit + tag.
+# Automated release via release-plz (https://release-plz.dev).
 #
-# Why dispatch instead of tag-push: a tag-push flow forces you to bump
-# Cargo.toml / Cargo.lock and tag in lockstep by hand. Any drift (notably a
-# stale Cargo.lock) makes `cargo publish` rewrite the lockfile on the runner,
-# dirty the tree, and abort — after which the tag already points at the wrong
-# commit and has to be force-moved. Doing the bump + lock sync + publish + tag
-# inside one job removes that whole class of failure.
+# Flow:
+#   1. `release-pr` runs on every push to main and maintains a single "Release
+#      PR" that bumps the version, updates the changelog, and (crucially) syncs
+#      Cargo.lock — all derived from the conventional-commit history.
+#   2. Merging that Release PR puts the bump on main, which triggers `release`
+#      to publish the new version to crates.io and create the git tag + GitHub
+#      Release.
+#
+# This replaces the previous hand-rolled flow. The whole point: the version
+# bump and Cargo.lock sync land in the Release PR and are reviewed/merged like
+# any change, so the lockfile can never drift out from under `cargo publish`
+# (the failure that motivated this rewrite).
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release, e.g. 1.0.5 (no leading v)"
-        required: true
-        type: string
+  push:
+    branches:
+      - main
 
-# Never run two publishes concurrently; do NOT cancel an in-flight publish — an
-# interrupted upload could leave a half-published version.
+# release-plz is the ONLY automated publish path. A crates.io version is
+# immutable, so never cancel an in-flight publish.
 concurrency:
-  group: release
+  group: release-plz
   cancel-in-progress: false
-
-# The job commits the bump and pushes the release tag back to the repo, so it
-# needs write access to repository contents.
-permissions:
-  contents: write
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  publish:
-    name: publish to crates.io
+  # Publishes to crates.io once a Release PR has been merged into main.
+  release-plz-release:
+    name: Release-plz release
     runs-on: ubuntu-latest
-    # Only the canonical repo publishes — a fork dispatching this must not
-    # attempt an upload (it would fail on a missing token, but fail fast).
+    # Only the canonical repo publishes — a fork must not attempt an upload.
     if: github.repository == 'TakakiAraki09/tiny-view'
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # release-plz drives git auth via the GITHUB_TOKEN env below; the
+          # checkout-persisted credentials would otherwise conflict.
+          persist-credentials: false
 
-      - name: Install Rust toolchain (stable)
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry / target
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: release-publish
-
-      # `cargo publish` compiles + verifies the package on the runner, so the
-      # native-WebView (wry) Linux system deps must be present — same set as the
-      # CI `test` / `release-build` jobs.
+      # `release` runs `cargo publish`, which compiles + verifies the crate on
+      # the runner. tinyview depends on wry (native WebView), so the same
+      # system deps as the CI build jobs must be present or the verify build
+      # fails. This step is the fix the bare release-plz template lacks.
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
@@ -69,78 +68,56 @@ jobs:
             pkg-config \
             build-essential
 
-      # Reject malformed input before doing anything irreversible. Accept
-      # X.Y.Z with an optional `-prerelease` suffix (e.g. 1.0.5, 2.0.0-rc.1).
-      - name: Validate version input
-        run: |
-          set -euo pipefail
-          VERSION="${{ inputs.version }}"
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::version '${VERSION}' is not a valid semver (expected X.Y.Z[-prerelease])"
-            exit 1
-          fi
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-
-      # Guards against the two irreversible collisions, BEFORE the upload:
-      # a crates.io version can never be re-published, and a moved release tag
-      # is the exact footgun this workflow exists to avoid.
-      - name: Guard against existing tag / published version
-        run: |
-          set -euo pipefail
-          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
-            echo "::error::tag v${VERSION} already exists — pick an unused version"
-            exit 1
-          fi
-          # crates.io returns 200 for an existing version, 404 otherwise.
-          CODE=$(curl -fsS -o /dev/null -w '%{http_code}' \
-            "https://crates.io/api/v1/crates/tinyview/${VERSION}" || true)
-          if [ "$CODE" = "200" ]; then
-            echo "::error::tinyview ${VERSION} is already published on crates.io"
-            exit 1
-          fi
-
-      # Set the package version to the requested value. `0,/.../` limits the
-      # substitution to the FIRST `version = "..."` line — that is the
-      # [package] version near the top of Cargo.toml; dependency versions use
-      # the inline `{ version = ... }` form and never start a line.
-      - name: Bump Cargo.toml version
-        run: |
-          set -euo pipefail
-          sed -i -E "0,/^version = \".*\"/s//version = \"${VERSION}\"/" Cargo.toml
-          # Sync Cargo.lock so the committed lockfile matches the new version —
-          # this is precisely the drift that broke the previous tag-push flow.
-          cargo update -p tinyview --precise "${VERSION}"
-
-      # Belt-and-suspenders: confirm the manifest now actually carries the
-      # requested version before the irreversible upload.
-      - name: Verify bumped version
-        run: |
-          set -euo pipefail
-          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          echo "input=${VERSION} cargo=${CARGO_VERSION}"
-          if [ "${VERSION}" != "${CARGO_VERSION}" ]; then
-            echo "::error::bump failed: Cargo.toml is ${CARGO_VERSION}, expected ${VERSION}"
-            exit 1
-          fi
-
-      # The irreversible step. `--locked` makes a lockfile mismatch a hard
-      # error here instead of a silent rewrite-and-dirty later. Run it BEFORE
-      # touching git so a failed publish leaves `main` clean — no orphan
-      # release commit or tag for a version that never shipped.
-      - name: cargo publish
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked
 
-      # Publish succeeded → record the release. Commit the bump and tag the
-      # exact commit that produced the published crate.
-      - name: Commit bump and push release tag
+  # Opens / updates the Release PR (version bump + changelog + Cargo.lock).
+  release-plz-pr:
+    name: Release-plz PR
+    runs-on: ubuntu-latest
+    if: github.repository == 'TakakiAraki09/tiny-view'
+    permissions:
+      contents: write
+      pull-requests: write
+    # Serialize PR updates so concurrent pushes don't race on the Release PR.
+    concurrency:
+      group: release-plz-pr-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # release-plz's default semver check compiles the crate, so the wry
+      # system deps are required here too.
+      - name: Install Linux system dependencies
         run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
-          git commit -m "chore: release v${VERSION}"
-          git push origin HEAD:main
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
