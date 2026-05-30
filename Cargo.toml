@@ -1,6 +1,6 @@
 [package]
 name = "tinyview"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 # MSRV. Pinned to the highest `rust-version` declared across the resolved
 # dependency graph (see `cargo metadata`). The effective floor is set by `wry`
