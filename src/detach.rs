@@ -46,6 +46,10 @@ pub struct SpawnOpts<'a> {
     pub allow_fetch: bool,
     pub allow_clipboard: bool,
     pub allow_storage: bool,
+    /// PRD §9.8 — pass `--frameless` to the detached child.
+    pub frameless: bool,
+    /// PRD §9.9 — pass `--transparent` to the detached child.
+    pub transparent: bool,
 }
 
 /// 自身を detached child として spawn し、合成済み HTML を stdin に書き込む。
@@ -68,6 +72,12 @@ pub fn spawn(opts: &SpawnOpts<'_>) -> std::io::Result<()> {
     }
     if opts.allow_storage {
         cmd.arg("--allow-storage");
+    }
+    if opts.frameless {
+        cmd.arg("--frameless");
+    }
+    if opts.transparent {
+        cmd.arg("--transparent");
     }
 
     cmd.stdin(Stdio::piped());

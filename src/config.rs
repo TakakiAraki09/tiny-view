@@ -129,7 +129,10 @@ line_numbers = "true"
             assert_eq!(cfg.window_width, Some(1200));
             assert_eq!(cfg.window_height, Some(800));
             assert_eq!(cfg.default_template.as_deref(), Some("raw"));
-            assert_eq!(cfg.extension.get("md").map(String::as_str), Some("markdown"));
+            assert_eq!(
+                cfg.extension.get("md").map(String::as_str),
+                Some("markdown")
+            );
             assert_eq!(cfg.extension.get("rs").map(String::as_str), Some("code"));
             assert_eq!(
                 cfg.templates

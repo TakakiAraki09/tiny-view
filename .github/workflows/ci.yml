@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+  pull_request:
+    branches:
+      - main
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          # Windows is intentionally excluded: detach mode (PRD §9 / detach.rs)
+          # is not implemented on Windows yet.
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry / target
+        uses: Swatinem/rust-cache@v2
+
+      # wry 0.55 requires libwebkit2gtk-4.1 on Linux (Ubuntu 22.04+).
+      # Source: https://github.com/tauri-apps/wry README + Tauri prerequisites.
+      # libgtk-3-dev is for tao; libxdo / libayatana / librsvg / libssl are
+      # Tauri prerequisite parity (transitively required by wry features).
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      - name: cargo build
+        run: cargo build --verbose
+
+      - name: cargo test
+        run: cargo test --verbose
+
+      # `-D warnings` enforces zero-warning policy per CLAUDE.md "warning 0".
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  release-build:
+    name: release-build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry / target
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Separate cache key from the `test` job so debug + release artifacts
+          # don't clobber each other.
+          key: release
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      - name: cargo build --release
+        run: cargo build --release --verbose
+
+      # PRD §3: binary size budget is <10MB. We log size + a soft warning, but
+      # don't fail the build — a real perf-budget guard belongs in a dedicated
+      # job with proper baselines, not an ad-hoc CI check.
+      - name: Report release binary size
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            BIN="target/release/tinyview"
+          else
+            BIN="target/release/tinyview"
+          fi
+          if [ ! -f "$BIN" ]; then
+            echo "::error::release binary not found at $BIN"
+            exit 1
+          fi
+          SIZE_BYTES=$(wc -c < "$BIN" | tr -d ' ')
+          SIZE_MB=$(awk "BEGIN { printf \"%.2f\", $SIZE_BYTES / 1024 / 1024 }")
+          echo "tinyview release binary: ${SIZE_BYTES} bytes (${SIZE_MB} MB)"
+          echo "### tinyview release binary size (${{ matrix.os }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- path: \`$BIN\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- size: ${SIZE_BYTES} bytes (${SIZE_MB} MB)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PRD §3 budget: < 10 MB" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SIZE_BYTES" -gt $((10 * 1024 * 1024)) ]; then
+            echo "::warning::tinyview release binary exceeds PRD §3 budget (10 MB): ${SIZE_MB} MB"
+          fi

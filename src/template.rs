@@ -243,10 +243,7 @@ mod tests {
     #[test]
     fn resolve_unknown_name_becomes_user_template() {
         let got = resolve(Some("custom-layout"), None, None, None);
-        assert_eq!(
-            got,
-            TemplateRef::User(PathBuf::from("custom-layout.html"))
-        );
+        assert_eq!(got, TemplateRef::User(PathBuf::from("custom-layout.html")));
     }
 
     #[test]
@@ -261,10 +258,7 @@ mod tests {
         let out = render(&TemplateRef::Text, &data).expect("render ok");
 
         // The marker should be gone, replaced exactly once.
-        assert!(
-            !out.contains(MARKER),
-            "marker should have been substituted"
-        );
+        assert!(!out.contains(MARKER), "marker should have been substituted");
         // Should contain a JSON object with our input.
         assert!(
             out.contains(r#""input":"<h1>Hi</h1>""#),

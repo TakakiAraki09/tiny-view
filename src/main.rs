@@ -46,6 +46,16 @@ struct Cli {
     #[arg(long)]
     height: Option<u32>,
 
+    /// Frameless window — remove title bar and window decorations (PRD §9.8).
+    #[arg(long)]
+    frameless: bool,
+
+    /// Transparent window background (PRD §9.9). Combine with
+    /// `rgba(_,_,_,<1)` in your HTML/CSS to see through to the desktop.
+    /// On macOS this uses a private WKWebView API via wry's `transparent` feature.
+    #[arg(long)]
+    transparent: bool,
+
     /// Stay in foreground (skip detach). Useful for --watch / CI / debug.
     #[arg(long)]
     foreground: bool,
@@ -178,6 +188,19 @@ fn merge_params(
     out
 }
 
+/// Window-level configuration bundled together so we can grow this without
+/// inflating every internal signature. Width / height stay primitive because
+/// they have config-driven defaults; frameless / transparent are pure CLI flags.
+struct WindowOpts {
+    width: u32,
+    height: u32,
+    /// PRD §9.8 — strip title bar and OS chrome.
+    frameless: bool,
+    /// PRD §9.9 — transparent window background. Requires the WebView itself
+    /// to be transparent too; both are wired together in [`launch_webview`].
+    transparent: bool,
+}
+
 /// Launch the WebView and run the event loop. Diverges on macOS
 /// (`event_loop.run` is `-> !`).
 ///
@@ -186,8 +209,7 @@ fn merge_params(
 /// event loop proxy. The watcher guard is held inside this function so it
 /// lives exactly as long as the event loop.
 fn launch_webview(
-    width: u32,
-    height: u32,
+    window_opts: WindowOpts,
     html: String,
     perms: Permissions,
     raw_mode: bool,
@@ -198,9 +220,23 @@ fn launch_webview(
     // body for two different event types.
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
+    // Transparency is a *two-layer* contract:
+    //   1. tao's NSWindow / HWND must be transparent so the OS compositor
+    //      doesn't fill the background with the system window color.
+    //   2. wry's WKWebView / WebView2 / WebKitGTK must skip drawing its own
+    //      opaque background (otherwise it just paints over the transparent
+    //      window). See webview::build for the wry side.
+    // Frameless windows aren't draggable by default on macOS — that's an
+    // intentional tao behavior; users who want a draggable transparent window
+    // can use CSS `-webkit-app-region: drag` in their HTML.
     let window = match WindowBuilder::new()
         .with_title("tinyview")
-        .with_inner_size(LogicalSize::new(width as f64, height as f64))
+        .with_inner_size(LogicalSize::new(
+            window_opts.width as f64,
+            window_opts.height as f64,
+        ))
+        .with_decorations(!window_opts.frameless)
+        .with_transparent(window_opts.transparent)
         .build(&event_loop)
     {
         Ok(w) => w,
@@ -216,6 +252,7 @@ fn launch_webview(
             html: &html,
             perms,
             raw_mode,
+            transparent: window_opts.transparent,
         },
     ) {
         Ok(wv) => wv,
@@ -270,8 +307,12 @@ fn run_as_child(cli: Cli) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let width = cli.width.unwrap_or(1000);
-    let height = cli.height.unwrap_or(760);
+    let window_opts = WindowOpts {
+        width: cli.width.unwrap_or(1000),
+        height: cli.height.unwrap_or(760),
+        frameless: cli.frameless,
+        transparent: cli.transparent,
+    };
     let raw_mode = detach::detached_raw_mode();
     let perms = Permissions {
         allow_fetch: cli.allow_fetch,
@@ -279,7 +320,7 @@ fn run_as_child(cli: Cli) -> ExitCode {
         allow_storage: cli.allow_storage,
     };
 
-    launch_webview(width, height, html, perms, raw_mode, None)
+    launch_webview(window_opts, html, perms, raw_mode, None)
 }
 
 /// Parent / foreground path: full pipeline including template resolution.
@@ -371,7 +412,13 @@ fn run(cli: Cli) -> ExitCode {
         } else {
             None
         };
-        return launch_webview(width, height, html, perms, raw_mode, watch_ctx);
+        let window_opts = WindowOpts {
+            width,
+            height,
+            frameless: cli.frameless,
+            transparent: cli.transparent,
+        };
+        return launch_webview(window_opts, html, perms, raw_mode, watch_ctx);
     }
 
     // Detach: spawn ourselves as a detached child via Command::spawn,
@@ -384,6 +431,8 @@ fn run(cli: Cli) -> ExitCode {
         allow_fetch: cli.allow_fetch,
         allow_clipboard: cli.allow_clipboard,
         allow_storage: cli.allow_storage,
+        frameless: cli.frameless,
+        transparent: cli.transparent,
     };
 
     match detach::spawn(&opts) {
@@ -403,4 +452,64 @@ fn main() -> ExitCode {
     }
 
     run(cli)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn cli_defaults_frameless_and_transparent_to_false() {
+        let cli = Cli::try_parse_from(["tinyview", "file.html"]).expect("parse");
+        assert!(!cli.frameless);
+        assert!(!cli.transparent);
+    }
+
+    #[test]
+    fn cli_parses_frameless_flag() {
+        let cli = Cli::try_parse_from(["tinyview", "file.html", "--frameless"]).expect("parse");
+        assert!(cli.frameless);
+        assert!(!cli.transparent);
+    }
+
+    #[test]
+    fn cli_parses_transparent_flag() {
+        let cli = Cli::try_parse_from(["tinyview", "file.html", "--transparent"]).expect("parse");
+        assert!(cli.transparent);
+        assert!(!cli.frameless);
+    }
+
+    #[test]
+    fn cli_parses_frameless_and_transparent_together() {
+        let cli = Cli::try_parse_from(["tinyview", "file.html", "--frameless", "--transparent"])
+            .expect("parse");
+        assert!(cli.frameless);
+        assert!(cli.transparent);
+    }
+
+    #[test]
+    fn cli_frameless_and_transparent_coexist_with_existing_flags() {
+        // Regression guard: make sure adding the new flags didn't shadow or
+        // collide with width/height/--allow-fetch/--foreground argument parsing.
+        let cli = Cli::try_parse_from([
+            "tinyview",
+            "file.html",
+            "--frameless",
+            "--transparent",
+            "--width",
+            "640",
+            "--height",
+            "480",
+            "--allow-fetch",
+            "--foreground",
+        ])
+        .expect("parse");
+        assert!(cli.frameless);
+        assert!(cli.transparent);
+        assert_eq!(cli.width, Some(640));
+        assert_eq!(cli.height, Some(480));
+        assert!(cli.allow_fetch);
+        assert!(cli.foreground);
+    }
 }

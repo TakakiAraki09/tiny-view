@@ -37,6 +37,15 @@ pub struct BuildOptions<'a> {
     /// builder defaults are still applied. `--allow-*` flags force CSP
     /// injection regardless of this flag.
     pub raw_mode: bool,
+    /// PRD §9.9: enable per-pixel transparency on the WebView. Must be
+    /// paired with `WindowBuilder::with_transparent(true)` on the host
+    /// window — otherwise the OS compositor draws an opaque background
+    /// behind the WebView and the alpha channel is invisible.
+    ///
+    /// On macOS this requires the `transparent` wry feature (enabled in
+    /// Cargo.toml) because the implementation calls a WKWebView private
+    /// API (`_drawsBackground`).
+    pub transparent: bool,
 }
 
 /// Build the default CSP value, honoring `allow_fetch`.
@@ -158,6 +167,7 @@ pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
         .with_html(html_to_load)
         .with_incognito(!opts.perms.allow_storage)
         .with_clipboard(opts.perms.allow_clipboard)
+        .with_transparent(opts.transparent)
         .with_navigation_handler(|url: String| {
             // Top-level navigation policy: only `about:` and `data:` are allowed.
             // Everything else (http/https/file/custom schemes) is rejected.
@@ -214,7 +224,9 @@ mod tests {
         let html = "<html><head><title>x</title></head><body>y</body></html>";
         let out = inject_csp(html, &Permissions::default());
         // <meta> should appear immediately after `<head>` and before `<title>`.
-        let meta_idx = out.find("<meta http-equiv=\"Content-Security-Policy\"").unwrap();
+        let meta_idx = out
+            .find("<meta http-equiv=\"Content-Security-Policy\"")
+            .unwrap();
         let title_idx = out.find("<title>").unwrap();
         let head_open_end = out.find("<head>").unwrap() + "<head>".len();
         assert_eq!(meta_idx, head_open_end);
@@ -227,7 +239,9 @@ mod tests {
         let out = inject_csp(html, &Permissions::default());
         let head_open = out.find("<head ").unwrap();
         let head_close = out[head_open..].find('>').unwrap() + head_open + 1;
-        let meta_idx = out.find("<meta http-equiv=\"Content-Security-Policy\"").unwrap();
+        let meta_idx = out
+            .find("<meta http-equiv=\"Content-Security-Policy\"")
+            .unwrap();
         assert_eq!(
             meta_idx, head_close,
             "meta must be inserted immediately after the opening <head ...> tag"

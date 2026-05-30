@@ -189,7 +189,7 @@ fn recompose_html(ctx: &HandlerContext) -> std::io::Result<String> {
     };
     template::render(&ctx.template, &data).map_err(|e| {
         // RenderError → io::Error so the caller has a single error type.
-        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+        std::io::Error::other(e.to_string())
     })
 }
 
