@@ -1,4 +1,5 @@
-//! `~/.tinyview/config.toml` の lazy loader。
+//! config root の `config.toml` の lazy loader。
+//! config root の解決順は [`config_root`] を参照（XDG > `~/.config` > legacy `~/.tinyview`）。
 //!
 //! raw path (stdin + `-t` / `--param` / path どれも未指定) では **呼ばれない** 設計。
 //! 呼ばれた場合のみ `OnceCell` を用いてプロセス内で1回だけファイルを読み込み、結果をキャッシュする。
