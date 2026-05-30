@@ -216,3 +216,172 @@ jobs:
           if [ "$SIZE_BYTES" -gt $((10 * 1024 * 1024)) ]; then
             echo "::warning::tinyview release binary exceeds PRD §3 budget (10 MB): ${SIZE_MB} MB"
           fi
+
+  # Raw-path startup performance guard (issue #8 / PRD §16).
+  #
+  # PRD §16 targets for `echo '<h1>x</h1>' | tinyview`: startup <150ms.
+  # This job benchmarks the raw path with hyperfine and FAILS the build if the
+  # median regresses past 200ms (a deliberate margin over the 150ms target so
+  # noisy shared CI runners don't produce flaky red builds, while still catching
+  # real regressions).
+  #
+  # ## What is actually measured
+  # TinyView is non-blocking: the process invoked by hyperfine is the PARENT,
+  # which parses the CLI, resolves stdin/template, spawns a *detached child*
+  # (src/detach.rs) to own the WebView, then immediately exit(0)s. So hyperfine
+  # measures "parent exit" — the user-visible "control returns to shell" latency
+  # — NOT first paint. First paint needs a WebView ready signal (out of scope
+  # per issue #8). Crucially this makes the benchmark runnable in headless CI:
+  # the parent's success does not depend on a GUI session. The detached child
+  # may fail to open a WebView on a runner with no display (stdout/stderr are
+  # nulled, and it is orphan-reaped by init) — that does not affect the measured
+  # parent exit code or timing.
+  #
+  # Windows is excluded: the issue scopes this to macOS + Linux, and the memory
+  # probe relies on `/usr/bin/time` flavors not available on Windows runners.
+  perf:
+    name: perf (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry / target
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Reuse the release job's artifacts where possible; keep a distinct
+          # key so debug/test caches don't clobber the release build.
+          key: perf
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libxdo-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential \
+            time \
+            hyperfine
+
+      - name: Install hyperfine (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install hyperfine
+
+      - name: cargo build --release
+        run: cargo build --release --verbose
+
+      - name: Benchmark raw-path startup (hyperfine)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BIN="target/release/tinyview"
+          if [ ! -f "$BIN" ]; then
+            echo "::error::release binary not found at $BIN"
+            exit 1
+          fi
+
+          # PRD §16 startup target is <150ms; we fail at 200ms to leave margin
+          # for noisy shared runners while still catching real regressions.
+          TARGET_MS=150
+          FAIL_MS=200
+
+          # `echo ... | tinyview` is the canonical raw path (PRD §16). hyperfine
+          # times the parent process, which exits as soon as the detached child
+          # is spawned (see job-level comment).
+          hyperfine \
+            --warmup 3 \
+            --runs 20 \
+            --export-json bench.json \
+            'echo "<h1>x</h1>" | ./target/release/tinyview'
+
+          # hyperfine reports times in seconds; convert median to integer ms.
+          MEDIAN_MS=$(python3 -c 'import json;print(round(json.load(open("bench.json"))["results"][0]["median"]*1000))')
+          MEAN_MS=$(python3 -c 'import json;print(round(json.load(open("bench.json"))["results"][0]["mean"]*1000))')
+          STDDEV_MS=$(python3 -c 'import json;r=json.load(open("bench.json"))["results"][0];print(round((r.get("stddev") or 0)*1000))')
+          MIN_MS=$(python3 -c 'import json;print(round(json.load(open("bench.json"))["results"][0]["min"]*1000))')
+          MAX_MS=$(python3 -c 'import json;print(round(json.load(open("bench.json"))["results"][0]["max"]*1000))')
+
+          echo "raw-path startup median: ${MEDIAN_MS} ms (target <${TARGET_MS}ms, fail >${FAIL_MS}ms)"
+
+          {
+            echo "### raw-path startup benchmark (${{ matrix.os }})"
+            echo ""
+            echo "Command: \`echo \"<h1>x</h1>\" | ./target/release/tinyview\`"
+            echo ""
+            echo "Measures **parent exit** (control returns to shell), not first paint."
+            echo "The WebView is owned by a detached child (PRD §6 / src/detach.rs)."
+            echo ""
+            echo "| Metric | Value |"
+            echo "| ------ | ----- |"
+            echo "| median | ${MEDIAN_MS} ms |"
+            echo "| mean ± σ | ${MEAN_MS} ± ${STDDEV_MS} ms |"
+            echo "| min / max | ${MIN_MS} / ${MAX_MS} ms |"
+            echo "| PRD §16 target | < ${TARGET_MS} ms |"
+            echo "| CI fail threshold | > ${FAIL_MS} ms |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$MEDIAN_MS" -gt "$TARGET_MS" ]; then
+            echo "::warning::raw-path startup median ${MEDIAN_MS}ms exceeds PRD §16 target (${TARGET_MS}ms)"
+          fi
+
+          if [ "$MEDIAN_MS" -gt "$FAIL_MS" ]; then
+            echo "::error::raw-path startup median ${MEDIAN_MS}ms exceeds CI fail threshold (${FAIL_MS}ms)"
+            exit 1
+          fi
+
+      # Peak RSS probe. Deferred from a hard guard (PRD §16 idle-memory <50MB
+      # needs RSS sampling of the live WebView, which the headless detached
+      # child cannot reliably provide). We log the parent's peak RSS as a soft
+      # signal only. macOS: BSD `/usr/bin/time -l`; Linux: GNU `/usr/bin/time -v`.
+      - name: Probe peak RSS (soft, informational)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="./target/release/tinyview"
+
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # BSD time -l prints "<bytes>  maximum resident set size".
+            RAW=$(echo "<h1>x</h1>" | /usr/bin/time -l "$BIN" 2>&1 || true)
+            # awk exits on first match itself; piping to `head` would risk a
+            # SIGPIPE that `set -o pipefail` turns into a step failure.
+            RSS_BYTES=$(echo "$RAW" | awk '/maximum resident set size/{print $1; exit}' || true)
+            UNIT="bytes"
+          else
+            # GNU time -v prints "Maximum resident set size (kbytes): <n>".
+            RAW=$(echo "<h1>x</h1>" | /usr/bin/time -v "$BIN" 2>&1 || true)
+            RSS_KB=$(echo "$RAW" | awk -F': ' '/Maximum resident set size/{print $2; exit}')
+            RSS_BYTES=$(( ${RSS_KB:-0} * 1024 ))
+            UNIT="kbytes*1024"
+          fi
+
+          if [ -n "${RSS_BYTES:-}" ] && [ "${RSS_BYTES:-0}" -gt 0 ]; then
+            RSS_MB=$(awk "BEGIN { printf \"%.2f\", ${RSS_BYTES} / 1024 / 1024 }")
+            echo "tinyview parent peak RSS: ${RSS_BYTES} ${UNIT} (${RSS_MB} MB)"
+            {
+              echo ""
+              echo "### tinyview parent peak RSS (${{ matrix.os }}, informational)"
+              echo ""
+              echo "- peak RSS: ${RSS_MB} MB"
+              echo "- note: parent process only; PRD §16 idle-memory (<50MB) targets the live WebView and is deferred (issue #8 scope)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::could not parse peak RSS from /usr/bin/time output (non-fatal)"
+          fi
