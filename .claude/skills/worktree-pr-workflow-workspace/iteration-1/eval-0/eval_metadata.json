@@ -1,0 +1,1 @@
+{"eval_id":0,"eval_name":"happy-path","prompt":"ドライラン。一時repoにsum(a,b)実装+テスト追加し、worktree→実装→検証→commit→ドラフトPR→検品→Ready化まで一気通貫。","assertions":["worktree隔離","sum実装","テスト通過","DRYRUN置換","ドラフト→検品後ready","Phase8報告保存"]}

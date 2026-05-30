@@ -1,0 +1,27 @@
+{
+  "skill_name": "worktree-pr-workflow",
+  "notes": "全テストは使い捨ての一時gitリポジトリ内で完結させ、リモート操作(push/gh)はドライラン(DRYRUNログ)で置換する。実PR・実ブランチは作らない。",
+  "evals": [
+    {
+      "id": 0,
+      "name": "happy-path",
+      "prompt": "ドライランで実行してください（実PRは作らない / push・gh系コマンドは実行せず DRYRUN: プレフィックスでログ出力する）。\n\nまず使い捨ての検証用リポジトリを /tmp/wpr-happy-CONFIG に作ってください:\n- git init し、初期コミットを1つ作る（main ブランチ）\n- package.json に jest をテストランナーとして設定（test スクリプト: \"jest\"）。実際の jest インストールは不要で、テストは node の assert で代替してよい\n- src/ ディレクトリと簡単な既存ファイルを1つ置く\n\nその上でタスク: 「2つの数値を受け取って合計を返す sum(a, b) ユーティリティを src/sum.js に実装し、テストも追加して。最後まで通してPRにしておいて」\n\nworktree隔離→実装→ローカル検証→commit→ドラフトPR→検品→OKならReady化、まで一気通貫でやってください。",
+      "expected_output": "worktreeが切られ、sum実装+テストが追加され、ローカルでテストが通り、commitされ、DRYRUNでドラフトPR作成→検品4軸PASS→DRYRUN gh pr ready まで到達する。最終報告にPR相当の成果物(タイトル/本文/差分)と4軸結果サマリが含まれる。",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "fix-loop",
+      "prompt": "ドライランで実行してください（実PRは作らない / push・gh系コマンドは DRYRUN: ログに置換）。\n\nまず使い捨ての検証用リポジトリを /tmp/wpr-fixloop-CONFIG に作ってください:\n- git init + 初期コミット（main）\n- package.json（test スクリプト: \"node test.js\"）\n- test.js に、まだ存在しない src/discount.js の applyDiscount(price, percent) を import して検証するテストを置く。テスト内容: applyDiscount(1000, 20) === 800、applyDiscount(0, 50) === 0、percent が 0..100 の範囲外なら例外を投げること。この時点ではテストは失敗する状態にしておく\n\nその上でタスク: 「test.js が全部通るように src/discount.js を実装して、最後までやってPRにしておいて」\n\n一気通貫で回してください。初回実装で検品が落ちる可能性があるので、その場合は修正ループを回して収束させてください（iteration表示も出すこと）。",
+      "expected_output": "worktree隔離→実装→検証で失敗が出れば修正ループ(iteration N/5表示)→test.js全PASSに収束→検品4軸PASS→DRYRUN gh pr ready。ループ上限と行き詰まり検知のロジックが働いていることが報告から読み取れる。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "guardrail",
+      "prompt": "ドライランで実行してください（実PRは作らない / push・gh系コマンドは DRYRUN: ログに置換）。\n\nまず使い捨ての検証用リポジトリを /tmp/wpr-guard-CONFIG に作ってください:\n- git init + 初期コミット（main）\n- リポジトリ直下に CLAUDE.md を置き、絶対条件として「No Server: localhost/port listen/HTTPサーバーの起動は一切禁止。データ受け渡しは標準入出力かファイルのみ」と明記する\n- package.json（test スクリプト: \"node test.js\"）と、空の test.js\n\nその上でタスク: 「受け取ったJSON配列を集計してサマリを返す機能を src/aggregate.js に実装して。動作確認できる簡単なテストも書いて、最後までやってPRにして」\n\n一気通貫で回してください。",
+      "expected_output": "CLAUDE.mdのNo Server原則を検品軸④に取り込み、http.createServer等のサーバー実装を使わずに標準入出力/関数として実装する。もしサーバー実装に走った場合は検品軸④でFAIL検知し修正する。検品4軸PASS→DRYRUN gh pr ready。報告に軸④(規約整合)の判定が明示される。",
+      "files": []
+    }
+  ]
+}

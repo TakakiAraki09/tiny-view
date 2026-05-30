@@ -1,0 +1,27 @@
+{
+  "skill_name": "issue-batch-pr",
+  "notes": "全テストは使い捨ての一時gitリポジトリ内で完結させ、gh issue list の代わりに擬似issueリストを与える。各subagentはworktree-pr-workflowのドライランで回し、push/gh系はDRYRUNログに置換。実PR・実ブランチは作らない。",
+  "evals": [
+    {
+      "id": 0,
+      "name": "happy-path-batch",
+      "prompt": "ドライランで実行してください（実PRは作らない / push・gh系コマンドは DRYRUN: プレフィックスでログ出力）。実際の GitHub には触らず、下記の擬似 issue リストを `prepare-development` ラベルの対象集合として扱ってください。\n\nまず使い捨ての検証用リポジトリを /tmp/ibp-happy-CONFIG に作ってください:\n- git init し初期コミット（main）\n- package.json（test スクリプト: \"node test.js\"）、src/ ディレクトリ、空の test.js\n\n擬似 issue リスト（prepare-development）:\n- #11 「sum(a,b) を src/sum.js に実装。2数の合計を返す。テストも追加」\n- #12 「clamp(v,min,max) を src/clamp.js に実装。範囲内に丸める。テストも追加」\n- #13 「slugify(str) を src/slugify.js に実装。空白を-に、英小文字化。テストも追加」\n\nこの3件を、各 issue ごとに worktree-pr-workflow（ドライラン）で実装→検証→commit→ドラフトPR→検品→Ready化相当 まで並列で回してください。最後に成功/要確認/失敗の集約表を出してください。",
+      "expected_output": "対象3件の一覧を提示し、1 issue=1 subagentで並列ディスパッチ。各 subagent が別 worktree(issue番号入り)で実装し、DRYRUNでドラフトPR作成→検品4軸→DRYRUN gh pr ready相当に到達。最終に issue/status/pr_url/補足 の集約表（3件すべてready相当）が提示される。",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "partial-failure-keeps-drafts",
+      "prompt": "ドライランで実行してください（実PRは作らない / push・gh系は DRYRUN: ログに置換）。GitHub には触らず、下記擬似 issue リストを `prepare-development` の対象集合として扱ってください。\n\n使い捨て検証用リポジトリを /tmp/ibp-partial-CONFIG に作成:\n- git init + 初期コミット（main）\n- package.json（test: \"node test.js\"）、src/、空の test.js\n\n擬似 issue リスト（prepare-development）:\n- #21 「isEven(n) を src/is-even.js に実装。偶数判定。テストも追加」（明確）\n- #22 「決済プロバイダ連携を実装」（要件が曖昧で、本文に詳細・API仕様・受け入れ条件が一切ない。情報不足で1件では完結できない想定）\n- #23 「reverse(str) を src/reverse.js に実装。文字列反転。テストも追加」（明確）\n\n各 issue を並列でさばいてください。曖昧な #22 は worktree-pr-workflow の収束判定に従い、行き詰まってもドラフトPRを残して『要確認』として終えること。最後に成功/要確認/失敗を分類した集約表を出してください。",
+      "expected_output": "3件並列ディスパッチ。#21/#23 は完走してready相当、#22 は要件不足で完走できず『要確認(ドラフト)』として DRYRUN ドラフトPRを残す（PRを作らず失敗終了しない）。1件の未完で全体を止めず、最終集約表で ready / draft を明確に分類し、#22 の残課題(要件不足)を報告する。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "zero-issues-and-gate",
+      "prompt": "ドライランで実行してください（GitHub には触らない）。下記の擬似 issue 状況を前提に振る舞ってください。\n\n使い捨て検証用リポジトリを /tmp/ibp-zero-CONFIG に作成（git init + 初期コミットだけでよい）。\n\n擬似 issue 状況: このリポジトリには open issue がいくつかあるが、`prepare-development` ラベルの付いた issue は1件も無いものとします（該当0件）。\n\nタスク: 「prepare-development ラベルの issue を全部まとめて実装してPRにしておいて」。この依頼を受けて、対象を収集してから着手判断をしてください。",
+      "expected_output": "対象ラベルで絞った結果が0件であることを検出し、subagentのディスパッチに進まず『対象issueなし』と報告して終了する。worktree作成やPR作成などの副作用を一切行わない。確認ゲートの考え方（着手前に対象を確認する）が機能していることが読み取れる。",
+      "files": []
+    }
+  ]
+}

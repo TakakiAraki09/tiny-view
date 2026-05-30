@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "pass_rate": 0.8333,
+    "passed": 5,
+    "failed": 1,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "CLAUDE.md(No Server)を読み軸④に取り込む",
+      "passed": true,
+      "evidence": "軸④でhttp/net/listen検査。"
+    },
+    {
+      "text": "実装がNo Server遵守(サーバーAPI不使用)",
+      "passed": true,
+      "evidence": "aggregate.jsにサーバーAPIなし(grep確認)。"
+    },
+    {
+      "text": "aggregate実装+テスト通過",
+      "passed": true,
+      "evidence": "+57/+48行。"
+    },
+    {
+      "text": "worktree隔離",
+      "passed": true,
+      "evidence": "feat/aggregate-json-summary。"
+    },
+    {
+      "text": "DRYRUN置換",
+      "passed": true,
+      "evidence": "未実行。"
+    },
+    {
+      "text": "Phase8: 軸④判定を明示した構造化報告を保存",
+      "passed": false,
+      "evidence": "レビュー出力[]で終了→保存抜け。"
+    }
+  ]
+}

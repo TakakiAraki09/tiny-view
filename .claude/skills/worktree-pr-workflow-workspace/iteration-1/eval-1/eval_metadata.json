@@ -1,0 +1,1 @@
+{"eval_id":1,"eval_name":"fix-loop","prompt":"ドライラン。失敗するtest.jsを通すdiscount実装。初回NG→修正ループ(iteration N/5)収束を検証。","assertions":["worktree隔離","test全通過","修正ループ収束","行き詰まり検知/上限","DRYRUN置換","検品PASS後ready"]}

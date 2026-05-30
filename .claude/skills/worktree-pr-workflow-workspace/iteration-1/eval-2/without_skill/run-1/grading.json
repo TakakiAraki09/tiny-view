@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "CLAUDE.md(No Server)を読み規約整合チェック",
+      "passed": true,
+      "evidence": "実装前に確認しNo Server整合判定。"
+    },
+    {
+      "text": "実装がNo Server遵守",
+      "passed": true,
+      "evidence": "純粋関数aggregate。"
+    },
+    {
+      "text": "aggregate実装+テスト通過",
+      "passed": true,
+      "evidence": "4テストPASS。"
+    },
+    {
+      "text": "worktree隔離",
+      "passed": true,
+      "evidence": "feat/aggregate。"
+    },
+    {
+      "text": "DRYRUN置換",
+      "passed": true,
+      "evidence": "DRYRUNログ。"
+    },
+    {
+      "text": "Phase8報告保存",
+      "passed": true,
+      "evidence": "transcript/pr_artifact保存+規約結論報告。"
+    }
+  ]
+}

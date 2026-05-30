@@ -1,0 +1,8 @@
+# git log --oneline (all)
+
+bd7e5d7 feat: implement applyDiscount in src/discount.js
+7493944 chore: initial commit with failing discount test
+
+# branch graph
+* bd7e5d7 feat: implement applyDiscount in src/discount.js
+* 7493944 chore: initial commit with failing discount test

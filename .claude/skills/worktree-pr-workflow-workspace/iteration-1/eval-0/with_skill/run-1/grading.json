@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "pass_rate": 0.8333,
+    "passed": 5,
+    "failed": 1,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "worktree隔離: feature branchを切りmain上で直接編集しない",
+      "passed": true,
+      "evidence": "worktree feat/add-sum, base main。"
+    },
+    {
+      "text": "sum(a,b)実装が src/sum.js に存在",
+      "passed": true,
+      "evidence": "src/sum.js +9行。"
+    },
+    {
+      "text": "テスト追加かつローカル検証が通る",
+      "passed": true,
+      "evidence": "sum.test.js + assert.test.js 追加。"
+    },
+    {
+      "text": "DRYRUN: 実push/実PRを作らずログ置換",
+      "passed": true,
+      "evidence": "リモート未作成。"
+    },
+    {
+      "text": "ドラフト作成→検品通過後にready(DRYRUN)",
+      "passed": true,
+      "evidence": "レビュー指摘ゼロ[]。"
+    },
+    {
+      "text": "Phase8: 構造化報告(PR成果物+4軸サマリ)を最後に提示・保存",
+      "passed": false,
+      "evidence": "最終メッセージがレビュー出力[]で終了。保存抜け→再構築要。"
+    }
+  ]
+}

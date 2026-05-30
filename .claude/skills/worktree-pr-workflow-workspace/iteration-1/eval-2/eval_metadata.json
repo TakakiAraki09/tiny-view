@@ -1,0 +1,1 @@
+{"eval_id":2,"eval_name":"guardrail","prompt":"ドライラン。CLAUDE.mdのNo Server原則repoでaggregate実装。検品軸④の規約整合を検証。","assertions":["CLAUDE.md読込/軸④","No Server遵守","実装+テスト通過","worktree隔離","DRYRUN置換","Phase8報告保存"]}

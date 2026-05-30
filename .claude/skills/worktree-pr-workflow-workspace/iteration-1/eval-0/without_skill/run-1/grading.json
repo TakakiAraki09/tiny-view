@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "worktree隔離",
+      "passed": true,
+      "evidence": "feat/sum-util。"
+    },
+    {
+      "text": "sum実装",
+      "passed": true,
+      "evidence": "型ガード付き。"
+    },
+    {
+      "text": "テスト通過",
+      "passed": true,
+      "evidence": "node --test 4/4。"
+    },
+    {
+      "text": "DRYRUN置換",
+      "passed": true,
+      "evidence": "gh/push DRYRUN。"
+    },
+    {
+      "text": "ドラフト→検品後ready",
+      "passed": true,
+      "evidence": "draft→OK→ready(DRYRUN)。"
+    },
+    {
+      "text": "Phase8報告保存",
+      "passed": true,
+      "evidence": "transcript/pr_artifact保存+サマリ返答。"
+    }
+  ]
+}

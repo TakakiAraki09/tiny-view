@@ -1,0 +1,2 @@
+a547749 feat: add sum(a, b) utility with tests
+51e5d86 chore: initial commit

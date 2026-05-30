@@ -1,0 +1,2 @@
+69c6cac ✨ feat: implement applyDiscount with 0..100 percent validation
+1c59554 chore: initial commit with failing discount tests

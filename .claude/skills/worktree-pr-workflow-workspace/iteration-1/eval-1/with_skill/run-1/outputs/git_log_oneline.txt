@@ -1,0 +1,2 @@
+52d3ee4 ✨ feat: add sum(a, b) utility with tests
+02a3b29 chore: initial commit with package.json and src

@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "pass_rate": 0.6667,
+    "passed": 4,
+    "failed": 2,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "worktree隔離",
+      "passed": true,
+      "evidence": "feat/apply-discount。"
+    },
+    {
+      "text": "test全通過",
+      "passed": true,
+      "evidence": "全PASS。"
+    },
+    {
+      "text": "初回FAIL→修正ループ収束",
+      "passed": false,
+      "evidence": "一発PASS(0ループ)。ループ機構は明示されず。"
+    },
+    {
+      "text": "行き詰まり検知/上限が機能",
+      "passed": false,
+      "evidence": "ループ非発生で概念登場せず。"
+    },
+    {
+      "text": "DRYRUN置換",
+      "passed": true,
+      "evidence": "DRYRUNログ。"
+    },
+    {
+      "text": "検品PASS後ready(DRYRUN)",
+      "passed": true,
+      "evidence": "ready(DRYRUN)。"
+    }
+  ]
+}

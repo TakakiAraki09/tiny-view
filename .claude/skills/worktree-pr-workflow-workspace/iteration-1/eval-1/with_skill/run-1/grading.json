@@ -1,0 +1,40 @@
+{
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 6,
+    "failed": 0,
+    "total": 6
+  },
+  "expectations": [
+    {
+      "text": "worktree隔離",
+      "passed": true,
+      "evidence": "feat/implement-apply-discount。"
+    },
+    {
+      "text": "discount.jsがtest全通過",
+      "passed": true,
+      "evidence": "6/6収束。"
+    },
+    {
+      "text": "初回FAIL→修正ループ(iteration N/5)収束",
+      "passed": true,
+      "evidence": "iter1/5境界バグ→iter2/5修正PASS。"
+    },
+    {
+      "text": "行き詰まり検知/上限が機能",
+      "passed": true,
+      "evidence": "同一指摘2連続なし→上限5明示。"
+    },
+    {
+      "text": "DRYRUN置換",
+      "passed": true,
+      "evidence": "未実行。"
+    },
+    {
+      "text": "検品4軸PASS後ready(DRYRUN)",
+      "passed": true,
+      "evidence": "PASS→ready(DRYRUN)+Phase8報告。"
+    }
+  ]
+}
