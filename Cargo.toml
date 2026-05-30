@@ -2,7 +2,14 @@
 name = "tinyview"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+# MSRV. Pinned to the highest `rust-version` declared across the resolved
+# dependency graph (see `cargo metadata`). The effective floor is set by `wry`
+# (the native WebView core; declares 1.77) and its transitive `time-core`
+# (declares 1.88) — not by TinyView's own source. `wry` cannot be dropped or
+# down-pinned without abandoning the native-WebView requirement (CLAUDE.md), so
+# the MSRV tracks the dependency reality. Verified by the `msrv` CI job, which
+# builds with exactly this toolchain. Bump policy: see README "MSRV policy".
+rust-version = "1.88"
 description = "Ephemeral CLI WebView runtime"
 license = "MIT"
 
@@ -30,10 +37,11 @@ serde_json = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 # `--watch` mode (PRD §9.10). Mini debouncer is intentionally chosen over
 # the full one — TinyView only needs "did this file change?" with a 100ms
-# trailing debounce, not rename correlation. 0.5.x is pinned because 0.7
-# bumps MSRV to 1.77 (this crate is rust-version = "1.75"). `notify` itself
-# is consumed transitively via `notify_debouncer_mini::notify` re-export to
-# avoid pulling two copies of notify into the binary.
+# trailing debounce, not rename correlation. 0.5.x is kept for API stability;
+# it is no longer the MSRV-limiting dependency (the floor is now `wry` /
+# `time-core` — see the `rust-version` note above). `notify` itself is consumed
+# transitively via `notify_debouncer_mini::notify` re-export to avoid pulling
+# two copies of notify into the binary.
 notify-debouncer-mini = "0.5"
 
 [target.'cfg(unix)'.dependencies]

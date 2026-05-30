@@ -365,6 +365,26 @@ not. Proposals that add a server, a port, a temp preview file, or that hurt the 
 target are out of scope by definition. Template / plugin / optional-feature paths are the right
 home for anything beyond the core runtime.
 
+### MSRV policy
+
+TinyView declares a **Minimum Supported Rust Version (MSRV)** via `rust-version` in
+[`Cargo.toml`](Cargo.toml). It is the oldest Rust toolchain guaranteed to compile the crate, and
+CI enforces it: the `msrv` job (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs
+`cargo build` with exactly that toolchain on every push and PR. If a dependency change raises the
+required Rust, this job fails instead of letting the drift reach downstream consumers.
+
+- **What sets the MSRV.** It is the *highest* `rust-version` across the resolved dependency graph,
+  not a free choice. Today the floor comes from the native-WebView core (`wry`) and its transitive
+  deps — not from TinyView's own source. You can find the current floor with `cargo metadata`.
+- **When you may bump it.** Only when adding or updating a dependency genuinely requires a newer
+  Rust, or when a language/`std` feature TinyView needs lands in a newer release. Do **not** bump
+  the MSRV casually to use a nicety that has an MSRV-compatible alternative.
+- **How to bump it.** Change `rust-version` in `Cargo.toml` **and** the matching `toolchain:`
+  value (and the `name:`) in the `msrv` CI job in the same commit, so the two never drift apart.
+  Note the reason in the PR description (which dependency/feature forced it).
+- **Prefer not bumping.** If a dependency upgrade is what raises the MSRV and the upgrade is not
+  required, pin the dependency to the last MSRV-compatible version instead of raising the floor.
+
 ### Tests
 
 ```bash
