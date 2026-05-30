@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>tinyview</title>
+<style>
+:root{color-scheme:light dark}
+html,body{margin:0;padding:0;background:Canvas;color:CanvasText}
+body{font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  display:flex;justify-content:center;align-items:flex-start}
+.mermaid{padding:24px;width:100%;display:flex;justify-content:center}
+.mermaid svg{max-width:100%;height:auto}
+.tinyview-error{padding:16px 20px;white-space:pre-wrap;
+  font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#b31d28}
+</style>
+<script>window.__TINYVIEW__ = /*__TINYVIEW__*/ null /*__TINYVIEW__*/;</script>
+<script>/*__TINYVIEW_MERMAID__*/</script>
+<script>
+(function(){
+  var d=window.__TINYVIEW__||{};
+  if(d.title)document.title=d.title;
+  var p=d.params||{};
+  function run(){
+    var src=(d.input==null)?"":String(d.input);
+    var dark=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var theme=p.theme||(dark?"dark":"default");
+    try{
+      window.mermaid.initialize({startOnLoad:false,theme:theme,securityLevel:"strict"});
+    }catch(e){}
+    var container=document.createElement("div");
+    container.className="mermaid";
+    container.textContent=src;
+    document.body.appendChild(container);
+    try{
+      var r=window.mermaid.run({nodes:[container]});
+      if(r&&r.catch){r.catch(showError);}
+    }catch(e){showError(e);}
+  }
+  function showError(e){
+    var err=document.createElement("pre");
+    err.className="tinyview-error";
+    err.textContent="mermaid render error:\n"+String(e&&e.message?e.message:e);
+    document.body.appendChild(err);
+  }
+  if(document.body){run()}else{document.addEventListener("DOMContentLoaded",run,{once:true})}
+})();
+</script>
+</head>
+<body></body>
+</html>

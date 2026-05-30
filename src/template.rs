@@ -25,6 +25,29 @@ const MARKER: &str = "/*__TINYVIEW__*/ null /*__TINYVIEW__*/";
 const TEXT_HTML: &str = include_str!("templates/text.html");
 const MINIMAL_HTML: &str = include_str!("templates/minimal.html");
 
+/// Optional built-in templates (PRD §15). These are self-contained HTML shells
+/// with `/*__TINYVIEW_<LIB>__*/` placeholders that runtime replaces with the
+/// vendored library JS/CSS below. The composition happens only when the
+/// template is actually used, so it never touches the `raw` fast path (KPI #1).
+const MARKDOWN_HTML: &str = include_str!("templates/markdown.html");
+const CODE_HTML: &str = include_str!("templates/code.html");
+const MERMAID_HTML: &str = include_str!("templates/mermaid.html");
+
+/// Vendored third-party libraries inlined into the optional templates.
+/// See `src/templates/vendor/README.md` for provenance and licenses. Nothing
+/// here is fetched at runtime — this keeps the No Server / self-contained
+/// contract (PRD §14) intact.
+const MARKED_JS: &str = include_str!("templates/vendor/marked.min.js");
+const HLJS_JS: &str = include_str!("templates/vendor/highlight.min.js");
+const HLJS_CSS: &str = include_str!("templates/vendor/hljs-theme.css");
+const MERMAID_JS: &str = include_str!("templates/vendor/mermaid.min.js");
+
+/// Library placeholders embedded in the optional template HTML shells.
+const LIB_MARKED: &str = "/*__TINYVIEW_MARKED__*/";
+const LIB_HLJS: &str = "/*__TINYVIEW_HLJS__*/";
+const LIB_HLJS_CSS: &str = "/*__TINYVIEW_HLJS_CSS__*/";
+const LIB_MERMAID: &str = "/*__TINYVIEW_MERMAID__*/";
+
 /// Resolved template selection.
 ///
 /// `Raw` is treated as the fastest path: caller is expected to skip marker
@@ -37,6 +60,12 @@ pub enum TemplateRef {
     Text,
     /// Built-in `minimal` template (centered `<main>` + innerHTML).
     Minimal,
+    /// Optional built-in `markdown` template (marked + highlight.js inline).
+    Markdown,
+    /// Optional built-in `mermaid` template (mermaid.js inline).
+    Mermaid,
+    /// Optional built-in `code` template (highlight.js inline; `--param lang=`).
+    Code,
     /// User-supplied template file under `~/.tinyview/templates/<name>.html`.
     User(PathBuf),
 }
@@ -128,6 +157,9 @@ fn name_to_ref(name: &str) -> TemplateRef {
         "raw" => TemplateRef::Raw,
         "text" => TemplateRef::Text,
         "minimal" => TemplateRef::Minimal,
+        "markdown" => TemplateRef::Markdown,
+        "mermaid" => TemplateRef::Mermaid,
+        "code" => TemplateRef::Code,
         other => {
             // Construct a relative file name `<name>.html`. Caller resolves
             // against the config root (e.g. `~/.tinyview/templates/`).
@@ -157,6 +189,23 @@ pub fn render(tpl: &TemplateRef, data: &InjectData<'_>) -> Result<String, Render
         }
         TemplateRef::Text => std::borrow::Cow::Borrowed(TEXT_HTML),
         TemplateRef::Minimal => std::borrow::Cow::Borrowed(MINIMAL_HTML),
+        // Replace `LIB_HLJS_CSS` before `LIB_HLJS`: the two placeholders do not
+        // overlap (`..._HLJS__*/` vs `..._HLJS_CSS__*/`), but doing the longer
+        // one first keeps the ordering robust against future placeholder renames.
+        TemplateRef::Markdown => std::borrow::Cow::Owned(
+            MARKDOWN_HTML
+                .replace(LIB_HLJS_CSS, HLJS_CSS)
+                .replace(LIB_MARKED, MARKED_JS)
+                .replace(LIB_HLJS, HLJS_JS),
+        ),
+        TemplateRef::Code => std::borrow::Cow::Owned(
+            CODE_HTML
+                .replace(LIB_HLJS_CSS, HLJS_CSS)
+                .replace(LIB_HLJS, HLJS_JS),
+        ),
+        TemplateRef::Mermaid => {
+            std::borrow::Cow::Owned(MERMAID_HTML.replace(LIB_MERMAID, MERMAID_JS))
+        }
         TemplateRef::User(path) => match std::fs::read_to_string(path) {
             Ok(s) => std::borrow::Cow::Owned(s),
             Err(e) => return Err(RenderError::UserTemplateRead(e)),
@@ -306,6 +355,78 @@ mod tests {
         assert_eq!(out, html);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_optional_builtin_names() {
+        assert_eq!(
+            resolve(Some("markdown"), None, None, None),
+            TemplateRef::Markdown
+        );
+        assert_eq!(
+            resolve(Some("mermaid"), None, None, None),
+            TemplateRef::Mermaid
+        );
+        assert_eq!(resolve(Some("code"), None, None, None), TemplateRef::Code);
+    }
+
+    #[test]
+    fn render_markdown_inlines_libs_and_marker() {
+        let params = empty_map();
+        let data = InjectData {
+            input: "Hello markdown",
+            params: &params,
+            title: "tinyview",
+            path: Some(Path::new("README.md")),
+        };
+        let out = render(&TemplateRef::Markdown, &data).expect("render ok");
+        // Data marker substituted, lib placeholders gone.
+        assert!(!out.contains(MARKER));
+        assert!(!out.contains(LIB_MARKED));
+        assert!(!out.contains(LIB_HLJS));
+        assert!(!out.contains(LIB_HLJS_CSS));
+        // Vendored libraries actually inlined (self-contained, no external refs).
+        assert!(out.contains("marked"), "marked.js not inlined");
+        assert!(out.contains("hljs"), "highlight.js not inlined");
+        assert!(out.contains(r#""input":"Hello markdown""#));
+        // No external resource references (No Server contract).
+        assert!(!out.contains("<script src="));
+        assert!(!out.contains("<link "));
+    }
+
+    #[test]
+    fn render_code_inlines_hljs() {
+        let mut params = HashMap::new();
+        params.insert("lang".to_string(), "rust".to_string());
+        let data = InjectData {
+            input: "fn main() {}",
+            params: &params,
+            title: "t",
+            path: None,
+        };
+        let out = render(&TemplateRef::Code, &data).expect("render ok");
+        assert!(!out.contains(MARKER));
+        assert!(!out.contains(LIB_HLJS));
+        assert!(!out.contains(LIB_HLJS_CSS));
+        assert!(out.contains("hljs"), "highlight.js not inlined");
+        assert!(out.contains(r#""lang":"rust""#));
+    }
+
+    #[test]
+    fn render_mermaid_inlines_lib() {
+        let params = empty_map();
+        let data = InjectData {
+            input: "graph TD; A-->B",
+            params: &params,
+            title: "t",
+            path: None,
+        };
+        let out = render(&TemplateRef::Mermaid, &data).expect("render ok");
+        assert!(!out.contains(MARKER));
+        assert!(!out.contains(LIB_MERMAID));
+        assert!(out.contains("mermaid"), "mermaid.js not inlined");
+        assert!(out.contains(r#""input":"graph TD; A-->B""#));
+        assert!(!out.contains("<script src="));
     }
 
     #[test]

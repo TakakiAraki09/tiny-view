@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>tinyview</title>
+<style>
+:root{color-scheme:light dark}
+html,body{margin:0;padding:0;height:100%;background:Canvas;color:CanvasText}
+body{font:13px/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+pre{margin:0;min-height:100%;box-sizing:border-box;overflow:auto;tab-size:4}
+pre code.hljs{padding:18px 20px}
+/*__TINYVIEW_HLJS_CSS__*/
+</style>
+<script>window.__TINYVIEW__ = /*__TINYVIEW__*/ null /*__TINYVIEW__*/;</script>
+<script>/*__TINYVIEW_HLJS__*/</script>
+<script>
+(function(){
+  var d=window.__TINYVIEW__||{};
+  if(d.title)document.title=d.title;
+  var p=d.params||{};
+  function run(){
+    var src=(d.input==null)?"":String(d.input);
+    var lang=p.lang||p.language||"";
+    var pre=document.createElement("pre");
+    var code=document.createElement("code");
+    try{
+      var res;
+      if(lang&&window.hljs.getLanguage(lang)){
+        res=window.hljs.highlight(src,{language:lang,ignoreIllegals:true});
+      }else{
+        res=window.hljs.highlightAuto(src);
+      }
+      code.className="hljs language-"+(res.language||"plaintext");
+      code.innerHTML=res.value;
+    }catch(e){
+      code.className="hljs";
+      code.textContent=src;
+    }
+    pre.appendChild(code);
+    document.body.appendChild(pre);
+  }
+  if(document.body){run()}else{document.addEventListener("DOMContentLoaded",run,{once:true})}
+})();
+</script>
+</head>
+<body></body>
+</html>
