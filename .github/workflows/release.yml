@@ -38,6 +38,9 @@ jobs:
     if: github.repository == 'TakakiAraki09/tiny-view'
     permissions:
       contents: write
+      # release-plz reads the merged Release PR to enrich the GitHub Release
+      # (links/labels); matches the official quickstart.
+      pull-requests: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -84,10 +87,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    # Serialize PR updates so concurrent pushes don't race on the Release PR.
-    concurrency:
-      group: release-plz-pr-${{ github.ref }}
-      cancel-in-progress: false
+    # Note: the workflow-level `concurrency: release-plz` already serializes
+    # every run, so no job-level concurrency is needed here.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
