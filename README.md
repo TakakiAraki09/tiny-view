@@ -456,16 +456,17 @@ the public API actually breaks regardless of the commit type.
 
 1. Push to `main`. release-plz keeps a single open **Release PR** that bumps the version, updates
    `CHANGELOG.md`, and syncs `Cargo.lock`.
-2. Merge that Release PR when you want to release. Merging lands the bump on `main` but does **not**
-   publish anything.
-3. Publish on demand: run the **Release** workflow from the Actions tab (`workflow_dispatch`). Only
-   then does it `cargo publish` to crates.io and create the git tag + GitHub Release.
+2. Merge that Release PR when you want to release. The merge publishes: release-plz `cargo publish`es
+   the new version to crates.io and creates the git tag + GitHub Release automatically.
 
-Publishing is a deliberate manual step because a crates.io version can never be re-published.
+Merging the Release PR **is** the release gate — it's a deliberate human action, so it doubles as
+the explicit step for the irreversible crates.io upload (a crates.io version can never be
+re-published). The bump and `Cargo.lock` sync are still reviewed in the PR before the merge triggers
+publishing.
 
-> Repo setup (one-time): the `release-pr` job needs **Settings → Actions → General → "Allow GitHub
-> Actions to create and approve pull requests"** enabled, plus a `CARGO_REGISTRY_TOKEN` secret used
-> for publishing.
+> Repo setup (one-time): release-plz needs **Settings → Actions → General → "Allow GitHub
+> Actions to create and approve pull requests"** enabled (so it can open the Release PR), plus a
+> `CARGO_REGISTRY_TOKEN` secret used for publishing.
 
 ### MSRV policy
 

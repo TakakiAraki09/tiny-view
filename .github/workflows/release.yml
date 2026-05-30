@@ -1,29 +1,32 @@
 name: Release
 
-# Automated release via release-plz (https://release-plz.dev), with a MANUAL
-# publish gate.
+# Automated release via release-plz (https://release-plz.dev). Merging the
+# Release PR publishes — there is no separate manual publish step.
 #
-# Flow:
-#   1. `release-pr` runs on every push to main and maintains a single "Release
-#      PR" that bumps the version, updates the changelog, and (crucially) syncs
-#      Cargo.lock — all derived from the conventional-commit history.
-#   2. You merge that Release PR when ready. The bump lands on main but is NOT
-#      yet published — merging alone never touches crates.io.
-#   3. You publish deliberately by running this workflow from the Actions tab
-#      (`workflow_dispatch`). `release` then publishes the merged-but-unpublished
-#      version to crates.io and creates the git tag + GitHub Release.
+# Flow (single job, runs on every push to main):
+#   1. The default release-plz command runs `release-pr` then `release` in one
+#      process. On a normal push, `release-pr` maintains a single "Release PR"
+#      that bumps the version, updates the changelog, and (crucially) syncs
+#      Cargo.lock — all derived from the conventional-commit history — while
+#      `release` finds nothing new to publish (the bump isn't on main yet).
+#   2. You merge that Release PR when ready. That push carries the bump onto
+#      main, so the same job's `release` step detects the new version and
+#      publishes it to crates.io, creating the git tag + GitHub Release.
 #
-# Why the split: the bump + Cargo.lock sync land in a reviewed PR (so the
-# lockfile can never drift out from under `cargo publish` — the failure that
-# motivated this rewrite), while the irreversible upload stays an explicit,
-# human-triggered action rather than a side effect of merging.
+# Why merge == publish: merging the Release PR is already a deliberate human
+# action, so it serves as the gate for the irreversible crates.io upload — a
+# separate manual `workflow_dispatch` step was redundant. The bump + Cargo.lock
+# sync still land in a reviewed PR first, so the lockfile can never drift out
+# from under `cargo publish` (the failure that motivated the release-plz setup).
+#
+# Single job (default command) on purpose: running `release-pr` and `release`
+# as two jobs racing on the same push could open a spurious Release PR before
+# the publish job tags the release. One process runs them in the correct order
+# and shares one checkout + dependency install.
 on:
-  # release-pr (push): keep the Release PR up to date automatically.
   push:
     branches:
       - main
-  # release (manual): publish the merged version on demand.
-  workflow_dispatch:
 
 # release-plz is the ONLY automated publish path. A crates.io version is
 # immutable, so never cancel an in-flight publish.
@@ -36,19 +39,18 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Publishes the merged-but-unpublished version to crates.io. Manual only:
-  # runs on workflow_dispatch, never on push, so merging a Release PR does not
-  # publish by itself.
-  release-plz-release:
-    name: Release-plz release
+  # Maintains the Release PR and publishes the merged bump, in that order, via
+  # release-plz's default command (release-pr + release).
+  release-plz:
+    name: Release-plz
     runs-on: ubuntu-latest
-    # Manual publish gate + canonical-repo guard (a fork must not upload).
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'TakakiAraki09/tiny-view'
+    # Canonical-repo guard: a fork must never publish or open PRs upstream.
+    if: github.repository == 'TakakiAraki09/tiny-view'
     permissions:
       contents: write
-      # release-plz reads the merged Release PR to enrich the GitHub Release
-      # (links/labels); matches the official quickstart.
-      pull-requests: read
+      # `release-pr` opens/updates the Release PR; `release` reads the merged PR
+      # to enrich the GitHub Release (links/labels). Needs write either way.
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,10 +63,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # `release` runs `cargo publish`, which compiles + verifies the crate on
-      # the runner. tinyview depends on wry (native WebView), so the same
-      # system deps as the CI build jobs must be present or the verify build
-      # fails. This step is the fix the bare release-plz template lacks.
+      # `release` runs `cargo publish` and `release-pr` runs a semver check —
+      # both compile + verify the crate on the runner. tinyview depends on wry
+      # (native WebView), so the same system deps as the CI build jobs must be
+      # present or the build fails. This is the fix the bare template lacks.
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
@@ -79,56 +81,10 @@ jobs:
             pkg-config \
             build-essential
 
+      # No `command` input → release-plz runs the default: `release-pr` then
+      # `release` sequentially in one process.
       - name: Run release-plz
         uses: release-plz/action@v0.5
-        with:
-          command: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  # Opens / updates the Release PR (version bump + changelog + Cargo.lock).
-  # Runs on push to main only; the manual dispatch is for publishing, not for
-  # refreshing the PR.
-  release-plz-pr:
-    name: Release-plz PR
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.repository == 'TakakiAraki09/tiny-view'
-    permissions:
-      contents: write
-      pull-requests: write
-    # Note: the workflow-level `concurrency: release-plz` already serializes
-    # every run, so no job-level concurrency is needed here.
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      # release-plz's default semver check compiles the crate, so the wry
-      # system deps are required here too.
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libxdo-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            pkg-config \
-            build-essential
-
-      - name: Run release-plz
-        uses: release-plz/action@v0.5
-        with:
-          command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
