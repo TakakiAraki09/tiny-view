@@ -277,6 +277,7 @@ jobs:
             libssl-dev \
             pkg-config \
             build-essential \
+            time \
             hyperfine
 
       - name: Install hyperfine (macOS)
@@ -359,12 +360,14 @@ jobs:
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             # BSD time -l prints "<bytes>  maximum resident set size".
             RAW=$(echo "<h1>x</h1>" | /usr/bin/time -l "$BIN" 2>&1 || true)
-            RSS_BYTES=$(echo "$RAW" | awk '/maximum resident set size/{print $1}' | head -n1)
+            # awk exits on first match itself; piping to `head` would risk a
+            # SIGPIPE that `set -o pipefail` turns into a step failure.
+            RSS_BYTES=$(echo "$RAW" | awk '/maximum resident set size/{print $1; exit}' || true)
             UNIT="bytes"
           else
             # GNU time -v prints "Maximum resident set size (kbytes): <n>".
             RAW=$(echo "<h1>x</h1>" | /usr/bin/time -v "$BIN" 2>&1 || true)
-            RSS_KB=$(echo "$RAW" | awk -F': ' '/Maximum resident set size/{print $2}' | head -n1)
+            RSS_KB=$(echo "$RAW" | awk -F': ' '/Maximum resident set size/{print $2; exit}')
             RSS_BYTES=$(( ${RSS_KB:-0} * 1024 ))
             UNIT="kbytes*1024"
           fi
