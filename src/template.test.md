@@ -18,5 +18,7 @@
 |マーカーが無ければ原文のまま|user テンプレにマーカーが無い場合、HTML を変えずに返す（stderr に warning）。|render|
 |markdown は marked + highlight.js をインライン|lib プレースホルダが消え `marked` / `hljs` が埋め込まれる。`<script src=` / `<link ` は出ない。|render / No Server 原則|
 |code は highlight.js をインライン|`lang=rust` が JSON に載り、hljs が埋め込まれる。|render|
-|mermaid は mermaid.js をインライン|外部 src 参照なし。|render|
+|mermaid は mermaid.js をインライン|外部 src 参照なし。`A-->B` の `>` はエスケープされるが、JSON round-trip で `input` が元の文字列に復元される。|render|
 |raw は render を呼ぶと panic|raw は描画をバイパスする契約なので、呼び出し自体が論理エラー。|render / PRD §13.1|
+|`</script>` を含む入力を無害化|注入リテラルに生の `</script>` / `<` が残らず（`<` 化）、JSON round-trip で `input` が `before</script>after` に一致。inline `<script>` が途中で閉じない。|build_literal / issue #29|
+|JS 行終端子 U+2028 / U+2029 を無害化|生の U+2028 / U+2029 が残らず `\uXXXX` 化され、JS オブジェクトリテラル評価時の構文エラーを防止。`input` はロスなく復元。|build_literal / issue #29|
