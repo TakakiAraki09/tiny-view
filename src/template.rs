@@ -189,6 +189,9 @@ pub fn render(tpl: &TemplateRef, data: &InjectData<'_>) -> Result<String, Render
         }
         TemplateRef::Text => std::borrow::Cow::Borrowed(TEXT_HTML),
         TemplateRef::Minimal => std::borrow::Cow::Borrowed(MINIMAL_HTML),
+        // Replace `LIB_HLJS_CSS` before `LIB_HLJS`: the two placeholders do not
+        // overlap (`..._HLJS__*/` vs `..._HLJS_CSS__*/`), but doing the longer
+        // one first keeps the ordering robust against future placeholder renames.
         TemplateRef::Markdown => std::borrow::Cow::Owned(
             MARKDOWN_HTML
                 .replace(LIB_HLJS_CSS, HLJS_CSS)

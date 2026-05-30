@@ -515,4 +515,27 @@ mod tests {
         assert!(cli.allow_fetch);
         assert!(cli.foreground);
     }
+
+    #[test]
+    fn merge_params_code_cli_lang_overrides_config() {
+        // `[templates.code.params] lang = "python"` in config, overridden by
+        // `--param lang=rust` on the CLI (CLI wins). Regression guard for the
+        // new optional built-in template name -> config key mapping.
+        let mut cfg = config::Config::default();
+        let mut entry = config::TemplateEntry::default();
+        entry
+            .params
+            .insert("lang".to_string(), "python".to_string());
+        entry
+            .params
+            .insert("theme".to_string(), "github".to_string());
+        cfg.templates.insert("code".to_string(), entry);
+
+        let cli_params = vec![("lang".to_string(), "rust".to_string())];
+        let merged = merge_params(&TemplateRef::Code, Some(&cfg), &cli_params);
+
+        assert_eq!(merged.get("lang").map(String::as_str), Some("rust"));
+        // Config-only params survive when not overridden.
+        assert_eq!(merged.get("theme").map(String::as_str), Some("github"));
+    }
 }

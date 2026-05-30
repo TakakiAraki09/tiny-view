@@ -200,6 +200,66 @@ pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
 mod tests {
     use super::*;
 
+    /// Dev-only: emit the fully-composed built-in templates (library inlined,
+    /// data injected, CSP `<meta>` applied exactly as the WebView would see)
+    /// to the temp dir so they can be loaded in a CSP-enforcing browser to
+    /// verify the optional templates actually render under `connect-src 'none'`
+    /// and no `'unsafe-eval'`. Ignored by default; run explicitly:
+    ///   cargo test --release write_builtin_render_fixtures -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn write_builtin_render_fixtures() {
+        use crate::template::{self, InjectData, TemplateRef};
+        use std::collections::HashMap;
+
+        struct Case {
+            name: &'static str,
+            tpl: TemplateRef,
+            input: &'static str,
+            params: &'static [(&'static str, &'static str)],
+        }
+
+        let dir = std::env::temp_dir();
+        let cases = [
+            Case {
+                name: "markdown",
+                tpl: TemplateRef::Markdown,
+                input: "# Title\n\nSome **bold** text.\n\n```rust\nfn main() { println!(\"hi\"); }\n```\n",
+                params: &[],
+            },
+            Case {
+                name: "code",
+                tpl: TemplateRef::Code,
+                input: "fn main() {\n    let x = 41 + 1;\n    println!(\"{x}\");\n}\n",
+                params: &[("lang", "rust")],
+            },
+            Case {
+                name: "mermaid",
+                tpl: TemplateRef::Mermaid,
+                input: "graph TD; A[Start] --> B{Choice}; B -->|yes| C[OK]; B -->|no| D[Stop];",
+                params: &[],
+            },
+        ];
+
+        for case in &cases {
+            let mut p: HashMap<String, String> = HashMap::new();
+            for (k, v) in case.params {
+                p.insert((*k).to_string(), (*v).to_string());
+            }
+            let data = InjectData {
+                input: case.input,
+                params: &p,
+                title: "tinyview",
+                path: None,
+            };
+            let html = template::render(&case.tpl, &data).expect("render ok");
+            let prepared = prepare_html(&html, &Permissions::default(), false);
+            let out = dir.join(format!("tinyview_fixture_{}.html", case.name));
+            std::fs::write(&out, prepared).expect("write fixture");
+            println!("FIXTURE {}: {}", case.name, out.display());
+        }
+    }
+
     #[test]
     fn csp_default_blocks_connect() {
         let csp = build_csp(&Permissions::default());
