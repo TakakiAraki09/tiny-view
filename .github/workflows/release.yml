@@ -1,23 +1,29 @@
 name: Release
 
-# Automated release via release-plz (https://release-plz.dev).
+# Automated release via release-plz (https://release-plz.dev), with a MANUAL
+# publish gate.
 #
 # Flow:
 #   1. `release-pr` runs on every push to main and maintains a single "Release
 #      PR" that bumps the version, updates the changelog, and (crucially) syncs
 #      Cargo.lock — all derived from the conventional-commit history.
-#   2. Merging that Release PR puts the bump on main, which triggers `release`
-#      to publish the new version to crates.io and create the git tag + GitHub
-#      Release.
+#   2. You merge that Release PR when ready. The bump lands on main but is NOT
+#      yet published — merging alone never touches crates.io.
+#   3. You publish deliberately by running this workflow from the Actions tab
+#      (`workflow_dispatch`). `release` then publishes the merged-but-unpublished
+#      version to crates.io and creates the git tag + GitHub Release.
 #
-# This replaces the previous hand-rolled flow. The whole point: the version
-# bump and Cargo.lock sync land in the Release PR and are reviewed/merged like
-# any change, so the lockfile can never drift out from under `cargo publish`
-# (the failure that motivated this rewrite).
+# Why the split: the bump + Cargo.lock sync land in a reviewed PR (so the
+# lockfile can never drift out from under `cargo publish` — the failure that
+# motivated this rewrite), while the irreversible upload stays an explicit,
+# human-triggered action rather than a side effect of merging.
 on:
+  # release-pr (push): keep the Release PR up to date automatically.
   push:
     branches:
       - main
+  # release (manual): publish the merged version on demand.
+  workflow_dispatch:
 
 # release-plz is the ONLY automated publish path. A crates.io version is
 # immutable, so never cancel an in-flight publish.
@@ -30,12 +36,14 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Publishes to crates.io once a Release PR has been merged into main.
+  # Publishes the merged-but-unpublished version to crates.io. Manual only:
+  # runs on workflow_dispatch, never on push, so merging a Release PR does not
+  # publish by itself.
   release-plz-release:
     name: Release-plz release
     runs-on: ubuntu-latest
-    # Only the canonical repo publishes — a fork must not attempt an upload.
-    if: github.repository == 'TakakiAraki09/tiny-view'
+    # Manual publish gate + canonical-repo guard (a fork must not upload).
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'TakakiAraki09/tiny-view'
     permissions:
       contents: write
       # release-plz reads the merged Release PR to enrich the GitHub Release
@@ -80,10 +88,12 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # Opens / updates the Release PR (version bump + changelog + Cargo.lock).
+  # Runs on push to main only; the manual dispatch is for publishing, not for
+  # refreshing the PR.
   release-plz-pr:
     name: Release-plz PR
     runs-on: ubuntu-latest
-    if: github.repository == 'TakakiAraki09/tiny-view'
+    if: github.event_name == 'push' && github.repository == 'TakakiAraki09/tiny-view'
     permissions:
       contents: write
       pull-requests: write

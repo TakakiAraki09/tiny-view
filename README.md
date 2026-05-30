@@ -430,6 +430,41 @@ not. Proposals that add a server, a port, a temp preview file, or that hurt the 
 target are out of scope by definition. Template / plugin / optional-feature paths are the right
 home for anything beyond the core runtime.
 
+### Releasing
+
+Releases are automated with [release-plz](https://release-plz.dev) — see
+[`.github/workflows/release.yml`](.github/workflows/release.yml). You never bump the version, edit
+`Cargo.lock`, or create tags by hand; release-plz owns all three.
+
+**Commit messages drive the version.** Commits merged to `main` must follow
+[Conventional Commits](https://www.conventionalcommits.org), because release-plz derives the next
+semver from them:
+
+| Commit                                       | Bump                                                  |
+| -------------------------------------------- | ----------------------------------------------------- |
+| `fix: …`                                     | patch                                                 |
+| `feat: …`                                    | minor                                                 |
+| `feat!: …` or a `BREAKING CHANGE:` footer    | major                                                 |
+| `chore:` / `docs:` / `ci:` / `refactor:` / `test:` | no bump on their own (still listed in the changelog) |
+
+The strongest bump among the unreleased commits wins, and `cargo-semver-checks` forces a major
+bump if the public API actually breaks regardless of the commit type.
+
+**Cutting a release:**
+
+1. Push to `main`. release-plz keeps a single open **Release PR** that bumps the version, updates
+   `CHANGELOG.md`, and syncs `Cargo.lock`.
+2. Merge that Release PR when you want to release. Merging lands the bump on `main` but does **not**
+   publish anything.
+3. Publish on demand: run the **Release** workflow from the Actions tab (`workflow_dispatch`). Only
+   then does it `cargo publish` to crates.io and create the git tag + GitHub Release.
+
+Publishing is a deliberate manual step because a crates.io version can never be re-published.
+
+> Repo setup (one-time): the `release-pr` job needs **Settings → Actions → General → "Allow GitHub
+> Actions to create and approve pull requests"** enabled, plus a `CARGO_REGISTRY_TOKEN` secret used
+> for publishing.
+
 ### MSRV policy
 
 TinyView declares a **Minimum Supported Rust Version (MSRV)** via `rust-version` in
