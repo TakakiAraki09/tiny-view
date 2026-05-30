@@ -48,7 +48,7 @@
 # raw `tinyview` binary would exit with "no input" and never open a window —
 # failing the issue #11 acceptance test ("double-click opens a WebView"). To fix
 # that *without* changing the CLI (issue #11: "tinyview (CLI) は据え置き"), the
-# bundle's CFBundleExecutable is a tiny launcher (Contents/MacOS/TinyView) that
+# bundle's CFBundleExecutable is a tiny launcher (Contents/MacOS/tinyview-app) that
 # pipes a bundled welcome HTML (Contents/Resources/welcome.html) into the real
 # binary (Contents/MacOS/tinyview) in --foreground mode. Welcome content is
 # in-memory via stdin (no temp preview file, no server). When the CLI binary is
@@ -188,7 +188,7 @@ WELCOME
 # welcome page into the real binary in --foreground so the bundle process owns
 # the WebView window (Finder/launchd expect the app process to persist while a
 # window is open; the CLI's detach-and-exit default would look like an instant
-# quit). $0 resolves to .../Contents/MacOS/TinyView, so siblings are addressed
+# quit). $0 resolves to .../Contents/MacOS/tinyview-app, so siblings are addressed
 # relative to it — the bundle is location-independent.
 cat > "${MACOS_DIR}/${LAUNCHER_NAME}" <<LAUNCHER
 #!/bin/sh
