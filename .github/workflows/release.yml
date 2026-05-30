@@ -41,8 +41,15 @@ jobs:
     # attempt an upload (it would fail on a missing token, but fail fast).
     if: github.repository == 'TakakiAraki09/tiny-view'
     steps:
+      # Always release main's tip, regardless of which ref dispatched this run,
+      # and check out a real `main` branch (not a detached/shallow HEAD) so the
+      # release commit can be pushed back normally. fetch-depth: 0 avoids
+      # shallow-push edge cases.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -71,10 +78,13 @@ jobs:
 
       # Reject malformed input before doing anything irreversible. Accept
       # X.Y.Z with an optional `-prerelease` suffix (e.g. 1.0.5, 2.0.0-rc.1).
+      # Take the input via `env:` rather than interpolating ${{ }} into the
+      # script body — avoids shell injection from the dispatch input.
       - name: Validate version input
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ inputs.version }}"
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::version '${VERSION}' is not a valid semver (expected X.Y.Z[-prerelease])"
             exit 1
@@ -91,8 +101,12 @@ jobs:
             echo "::error::tag v${VERSION} already exists — pick an unused version"
             exit 1
           fi
-          # crates.io returns 200 for an existing version, 404 otherwise.
-          CODE=$(curl -fsS -o /dev/null -w '%{http_code}' \
+          # crates.io returns 200 for an existing version, 404 otherwise. No
+          # -f: we want the status code, not a non-zero exit, so 404 yields
+          # CODE=404 and only a real 200 blocks. A network failure leaves CODE
+          # empty (→ proceed); `cargo publish` is the final backstop against a
+          # duplicate version.
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
             "https://crates.io/api/v1/crates/tinyview/${VERSION}" || true)
           if [ "$CODE" = "200" ]; then
             echo "::error::tinyview ${VERSION} is already published on crates.io"
@@ -132,15 +146,27 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked
 
-      # Publish succeeded → record the release. Commit the bump and tag the
-      # exact commit that produced the published crate.
-      - name: Commit bump and push release tag
+      # Publish succeeded → record the release. The crate is already immutable
+      # on crates.io, so the tag (the version↔commit binding) is the
+      # highest-priority record and is pushed FIRST. main is advanced after.
+      # No --force anywhere: a failure here cannot corrupt history, and the
+      # publish + tag already succeeded, so the warning tells the operator
+      # exactly what manual step remains.
+      - name: Commit bump, tag, and update main
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v${VERSION}"
-          git push origin HEAD:main
+          # Tag first — binds the published version to this commit even if the
+          # main push below fails.
           git tag "v${VERSION}"
           git push origin "v${VERSION}"
+          # Then fast-forward main to the release commit. If main advanced
+          # during the run this is rejected (no --force); recover by applying
+          # the bump commit to main by hand — the release itself is done.
+          if ! git push origin HEAD:main; then
+            echo "::error::published v${VERSION} and pushed tag v${VERSION}, but updating main failed (main likely advanced during the run). Apply the bump commit to main manually — do NOT re-run this workflow (the version is already published)."
+            exit 1
+          fi
