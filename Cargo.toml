@@ -12,6 +12,25 @@ edition = "2021"
 rust-version = "1.88"
 description = "Ephemeral CLI WebView runtime"
 license = "MIT"
+repository = "https://github.com/TakakiAraki09/tiny-view"
+homepage = "https://github.com/TakakiAraki09/tiny-view"
+documentation = "https://docs.rs/tinyview"
+readme = "README.md"
+keywords = ["webview", "cli", "preview", "ephemeral", "html"]
+categories = ["command-line-utilities", "gui"]
+# Keep the published crate lean and limited to what's needed to build the
+# binary. Cargo packages every git-tracked file by default; the entries below
+# strip dev-only docs, AI/agent workspace files, CI config, the human-readable
+# `*.test.md` summaries, and repo meta that downstream `cargo install` users do
+# not need. README/LICENSE are auto-included. Verified via `cargo package
+# --list` / `cargo publish --dry-run`.
+exclude = [
+    ".claude/",
+    ".github/",
+    "docs/",
+    "src/**/*.test.md",
+    "CLAUDE.md",
+]
 
 [[bin]]
 name = "tinyview"

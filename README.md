@@ -62,7 +62,17 @@ marker substitution entirely — the WebView receives the input HTML as-is.
 
 ## Install
 
-There is no published binary or `cargo install` target yet. Build from source:
+### From crates.io (recommended)
+
+```bash
+cargo install tinyview
+```
+
+This builds and installs the `tinyview` binary into `~/.cargo/bin` (make sure it is on your `PATH`).
+On Linux you also need WebKitGTK development headers at build time
+(`libwebkit2gtk-4.1-dev` on Debian/Ubuntu).
+
+### From source
 
 ```bash
 git clone https://github.com/TakakiAraki09/tiny-view.git
@@ -352,9 +362,8 @@ MVP is complete:
 - `--frameless` and `--transparent` window flags
 - `$XDG_CONFIG_HOME` / `~/.config/tinyview` config root with legacy `~/.tinyview` fallback
 
-Not yet implemented / out of MVP scope: optional `markdown` / `mermaid` / `code` built-ins,
-Windows runtime verification, published binaries,
-`cargo install` / Homebrew distribution.
+Distributed on crates.io (`cargo install tinyview`). Not yet implemented / out of MVP scope:
+Windows runtime verification, pre-built signed release binaries, Homebrew distribution.
 
 ---
 
