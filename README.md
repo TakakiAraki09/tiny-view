@@ -159,8 +159,16 @@ Input resolution priority: **stdin (when it has data) > file path > `--html`**.
 
 ## Configuration
 
-Config lives at `~/.tinyview/config.toml`. It is loaded **only when the raw fast path is bypassed**
-(template, param, or file path is involved), so it cannot slow down `echo … | tinyview`.
+Config lives in the TinyView config root. The root is resolved in this order, picking the first
+directory that exists:
+
+1. `$XDG_CONFIG_HOME/tinyview/` (when `XDG_CONFIG_HOME` is set)
+2. `$HOME/.config/tinyview/` (XDG default, mainly Linux)
+3. `$HOME/.tinyview/` (legacy default — used as the final fallback when none of the above exist, so existing setups keep working)
+
+`config.toml` and the `templates/` dir both live under this root. Config is loaded **only when the
+raw fast path is bypassed** (template, param, or file path is involved), so it cannot slow down
+`echo … | tinyview`.
 
 ```toml
 window_width = 1000
@@ -289,9 +297,10 @@ MVP is complete:
 - detach-by-default on Unix (Command::spawn + setsid); Windows path scaffolded
 - CSP injection, incognito-by-default, navigation handler, `--allow-*` flags
 - `--frameless` and `--transparent` window flags
+- `$XDG_CONFIG_HOME` / `~/.config/tinyview` config root with legacy `~/.tinyview` fallback
 
 Not yet implemented / out of MVP scope: optional `markdown` / `mermaid` / `code` built-ins,
-Windows runtime verification, `$XDG_CONFIG_HOME` support, published binaries,
+Windows runtime verification, published binaries,
 `cargo install` / Homebrew distribution.
 
 ---
