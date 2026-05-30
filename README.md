@@ -116,6 +116,34 @@ llm "make a settings panel in html" | tinyview -t minimal
 
 `minimal` wraps an HTML fragment in a centered, max-width 760px shell that follows the OS dark mode.
 
+### Render Markdown
+
+```bash
+tinyview README.md -t markdown
+```
+
+`markdown` parses the input with [marked](https://marked.js.org/) and highlights fenced code blocks
+with [highlight.js](https://highlightjs.org/) — both inlined into the document, nothing fetched.
+
+### Render a Mermaid diagram
+
+```bash
+tinyview graph.mmd -t mermaid
+# theme follows OS dark mode; override with --param theme=forest|neutral|dark|default
+```
+
+### Syntax-highlight source code
+
+```bash
+tinyview src/main.rs -t code --param lang=rust
+# omit lang to auto-detect
+```
+
+`markdown` / `mermaid` / `code` are **optional built-ins**: their libraries are embedded in the
+binary at compile time and inlined at render time, so they keep the No-Server / self-contained
+contract and never touch the `raw` fast path. See [`src/templates/vendor/`](src/templates/vendor/)
+for library provenance.
+
 ### Watch a file and reload on save
 
 ```bash
@@ -139,7 +167,7 @@ tinyview app.html --foreground
 | --------------------- | -------------------------------------------------------------------- |
 | `<source>`            | Path to an HTML file. Overridden by stdin if a pipe has data.        |
 | `--html <string>`     | Inline HTML literal.                                                 |
-| `-t, --template <n>`  | Template name: `raw` / `text` / `minimal` / user template.           |
+| `-t, --template <n>`  | Template: `raw`/`text`/`minimal`/`markdown`/`mermaid`/`code`/user.    |
 | `--param key=value`   | Template parameter, repeatable. Ignored in `raw` mode.               |
 | `--width <px>`        | Window width (default 1000, or `window_width` in config).            |
 | `--height <px>`       | Window height (default 760, or `window_height` in config).           |
@@ -174,25 +202,25 @@ mmd = "mermaid"
 rs = "code"
 ts = "code"
 
-[templates.markdown.params]
-theme = "github"
-
+# default language for the `code` template (overridden by `--param lang=…`)
 [templates.code.params]
-theme = "github-dark"
-line_numbers = true
+lang = "rust"
+
+# default theme for the `mermaid` template (default | dark | forest | neutral)
+[templates.mermaid.params]
+theme = "neutral"
 ```
 
 Template resolution priority: **`--template` > extension mapping > `default_template` > `raw`**.
 
-User templates live next to the config:
+A user template (any name that is not a built-in) lives next to the config and overrides nothing
+built-in:
 
 ```text
 ~/.tinyview/
 ├── config.toml
 └── templates/
-    ├── markdown.html
-    ├── mermaid.html
-    └── my-layout.html
+    └── my-layout.html   # used via `-t my-layout`
 ```
 
 ---
@@ -248,7 +276,8 @@ A minimal template:
 ```
 
 Built-in templates: `raw` (no substitution, fastest path), `text` (escaped monospace),
-`minimal` (centered HTML fragment shell).
+`minimal` (centered HTML fragment shell), and the optional `markdown` / `mermaid` / `code`
+(library bundled and inlined at render time).
 
 ---
 

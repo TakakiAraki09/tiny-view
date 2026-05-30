@@ -170,6 +170,9 @@ fn merge_params(
         TemplateRef::Raw => Some("raw"),
         TemplateRef::Text => Some("text"),
         TemplateRef::Minimal => Some("minimal"),
+        TemplateRef::Markdown => Some("markdown"),
+        TemplateRef::Mermaid => Some("mermaid"),
+        TemplateRef::Code => Some("code"),
         TemplateRef::User(p) => p.file_stem().and_then(|s| s.to_str()),
     };
 
