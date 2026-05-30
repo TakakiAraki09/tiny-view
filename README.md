@@ -11,6 +11,22 @@ Web UI counterpart of `open file.png` — a one-shot rendering primitive, not a 
 
 ---
 
+## Download
+
+```bash
+cargo install tinyview
+```
+
+This builds and installs the `tinyview` binary into `~/.cargo/bin` (make sure it is on your
+`PATH`). Requires Rust 1.75+. On Linux you also need WebKitGTK development headers at build time
+(`libwebkit2gtk-4.1-dev` on Debian/Ubuntu).
+
+Prefer not to use `cargo`? Build [from source](#from-source), or on macOS package a
+double-clickable [`TinyView.app`](#macos-tinyviewapp-bundle-optional). See [**Install**](#install)
+for all options.
+
+---
+
 ## What & why
 
 Confirming a small piece of HTML / Markdown / Mermaid / UI snippet usually means:
