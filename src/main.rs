@@ -12,6 +12,8 @@ use tao::window::WindowBuilder;
 
 mod config;
 mod detach;
+#[cfg(feature = "e2e")]
+mod e2e;
 mod template;
 mod watch;
 mod webview;
@@ -259,6 +261,10 @@ fn launch_webview(
             perms,
             raw_mode,
             transparent: window_opts.transparent,
+            // Production never installs the JS→native bridge; only the `e2e`
+            // self-test harness sets this (issue #5).
+            #[cfg(feature = "e2e")]
+            ipc_tx: None,
         },
     ) {
         Ok(wv) => wv,
@@ -451,6 +457,14 @@ fn run(cli: Cli) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    // E2E self-test mode (issue #5). Dispatched before CLI parsing / detach so
+    // the harness owns the main thread (tao event loops are main-thread only).
+    // Only compiled under the `e2e` feature; invoked via TINYVIEW_E2E_SELFTEST=1.
+    #[cfg(feature = "e2e")]
+    if std::env::var_os("TINYVIEW_E2E_SELFTEST").is_some() {
+        return e2e::run_selftest();
+    }
+
     let cli = Cli::parse();
 
     if detach::is_detached_child() {

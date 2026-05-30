@@ -46,6 +46,17 @@ pub struct BuildOptions<'a> {
     /// Cargo.toml) because the implementation calls a WKWebView private
     /// API (`_drawsBackground`).
     pub transparent: bool,
+
+    /// E2E-only IPC channel for the self-test harness (issue #5). When `Some`,
+    /// [`build`] installs a wry IPC handler that forwards
+    /// `window.ipc.postMessage(<string>)` bodies from page JS to this channel,
+    /// letting the harness observe in-page behavior (fetch / clipboard /
+    /// storage). The field — and the bridge it enables — only exist under the
+    /// `e2e` feature, so the production binary never carries a JS→native bridge
+    /// (CLAUDE.md security default: no native bridge). Production callers do not
+    /// (and cannot) set this.
+    #[cfg(feature = "e2e")]
+    pub ipc_tx: Option<std::sync::mpsc::Sender<String>>,
 }
 
 /// Build the default CSP value, honoring `allow_fetch`.
@@ -174,6 +185,15 @@ pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
             // Everything else (http/https/file/custom schemes) is rejected.
             url.starts_with("about:") || url.starts_with("data:")
         });
+
+    // E2E self-test bridge (issue #5). Only compiled under the `e2e` feature;
+    // production builds never reach this and never expose `window.ipc`.
+    #[cfg(feature = "e2e")]
+    if let Some(tx) = opts.ipc_tx {
+        builder = builder.with_ipc_handler(move |req: wry::http::Request<String>| {
+            let _ = tx.send(req.into_body());
+        });
+    }
 
     // Devtools: ON in debug builds, OFF in release. PRD §19.3.
     #[cfg(debug_assertions)]
