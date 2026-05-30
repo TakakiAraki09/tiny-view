@@ -41,6 +41,10 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# Integration-test driver for the real `tinyview` binary (issue #7). Used by
+# tests/user_template_e2e.rs to exercise the user-template resolve→read→inject
+# path end-to-end. dev-only, so it never touches the shipped binary size budget.
+assert_cmd = "2"
 
 [profile.release]
 opt-level = "z"
