@@ -28,9 +28,33 @@
 //! 親シェル終了時の SIGHUP が controlling terminal 経由で届かない。`setsid` は
 //! `exec` 前に呼ぶので、fork-after-Cocoa の問題は発生しない（exec で Mach
 //! state が wipe される）。
+//!
+//! ## Windows
+//!
+//! Windows には session / SIGHUP の概念が無いため、`CommandExt::creation_flags`
+//! でプロセス生成フラグを明示する（PRD §6.7）:
+//!
+//! - `DETACHED_PROCESS` — 子を親のコンソールから切り離す。これにより親シェル
+//!   終了後も子が生存し、かつ子が新しいコンソールウィンドウを作らない
+//!   （＝コンソールのチラつきを防ぐ）。
+//! - `CREATE_NEW_PROCESS_GROUP` — 子を新しいプロセスグループのルートにし、
+//!   親グループ宛ての Ctrl+C / Ctrl+Break が子に伝播しないようにする。
+//!
+//! これらは安定した Win32 ABI 定数なので、`windows-sys` 等の依存を増やさず
+//! （バイナリサイズ予算 <10MB を守るため）リテラルで定義する。
 
 use std::io::Write;
 use std::process::{Command, Stdio};
+
+/// Win32 `DETACHED_PROCESS` プロセス生成フラグ。
+/// 子を親のコンソールから切り離す（新しいコンソールも作らない）。
+#[cfg(windows)]
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+/// Win32 `CREATE_NEW_PROCESS_GROUP` プロセス生成フラグ。
+/// 子を新しいプロセスグループのルートにする。
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
 /// 子プロセスを識別する env var。値は `1`。
 pub const DETACHED_CHILD_ENV: &str = "TINYVIEW_DETACHED_CHILD";
@@ -99,6 +123,14 @@ pub fn spawn(opts: &SpawnOpts<'_>) -> std::io::Result<()> {
                 Ok(())
             });
         }
+    }
+
+    // Windows: コンソールから切り離し、独立したプロセスグループで起動する。
+    // PRD §6.7 — 親シェル終了後も子を生存させ、子コンソールのチラつきを防ぐ。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
 
     let mut child = cmd.spawn()?;

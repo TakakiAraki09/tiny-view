@@ -26,10 +26,13 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          # Windows is intentionally excluded: detach mode (PRD §9 / detach.rs)
-          # is not implemented on Windows yet.
           - ubuntu-latest
           - macos-latest
+          # Windows: detach mode (PRD §6.7 / detach.rs) now sets
+          # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP via creation_flags.
+          # WebView2 runtime ships pre-installed on windows-latest runners, so
+          # wry builds without extra system deps.
+          - windows-latest
 
     steps:
       - name: Checkout
@@ -84,6 +87,7 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
+          - windows-latest
 
     steps:
       - name: Checkout
@@ -124,8 +128,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ matrix.os }}" = "macos-latest" ]; then
-            BIN="target/release/tinyview"
+          # Windows appends .exe; Unix targets produce a bare binary name.
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            BIN="target/release/tinyview.exe"
           else
             BIN="target/release/tinyview"
           fi
