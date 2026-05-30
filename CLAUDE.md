@@ -80,7 +80,7 @@ Rust + wry + tao
 
 ## Config
 
-- Root: `~/.tinyview/`（将来 `$XDG_CONFIG_HOME/tinyview/` 対応検討）
+- Root 解決順（存在する最初を採用）: `$XDG_CONFIG_HOME/tinyview/` → `~/.config/tinyview/` → `~/.tinyview/`（後方互換 fallback）。詳細は `docs/PRD.md` §11.1
 - `config.toml` + `templates/<name>.html`（自己完結した単一HTML）の構成
 - 詳細は `docs/PRD.md` §11–§15
 
