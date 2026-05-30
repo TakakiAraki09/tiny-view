@@ -210,6 +210,32 @@ const MACOS_CLIPBOARD_NEUTRALIZE: &str = "\
 try { Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: false }); } \
 catch (e) { try { navigator.clipboard = undefined; } catch (_) {} }";
 
+/// Initialization script enabling Cmd/Ctrl +/-/0 zoom.
+///
+/// wry 0.55 exposes no native zoom API, so zoom is implemented purely in JS by
+/// driving `document.documentElement.style.zoom` (supported by WKWebView,
+/// WebView2 and WebKitGTK). Injected as a WebView user script — which runs
+/// before page scripts and is not subject to the page's CSP `<meta>` — so it
+/// works regardless of the document's CSP, and `element.style` (CSSOM) writes
+/// are not governed by `style-src` either. State lives only in the closure and
+/// dies with the window, preserving the ephemeral runtime guarantee.
+///
+/// Bindings: Cmd (macOS) or Ctrl (Win/Linux) + `+`/`=` zoom in, `-`/`_` zoom
+/// out, `0` reset to 1.0. Factor is clamped to [0.3, 5.0] in 0.1 steps.
+const ZOOM_SCRIPT: &str = "\
+(function () { \
+  var z = 1, MIN = 0.3, MAX = 5, STEP = 0.1; \
+  function round(v) { return Math.round(v * 100) / 100; } \
+  function apply() { var el = document.documentElement; if (el) { el.style.zoom = String(z); } } \
+  window.addEventListener('keydown', function (e) { \
+    if (!(e.metaKey || e.ctrlKey)) return; \
+    var k = e.key; \
+    if (k === '+' || k === '=') { e.preventDefault(); z = round(Math.min(MAX, z + STEP)); apply(); } \
+    else if (k === '-' || k === '_') { e.preventDefault(); z = round(Math.max(MIN, z - STEP)); apply(); } \
+    else if (k === '0') { e.preventDefault(); z = 1; apply(); } \
+  }, true); \
+})();";
+
 /// Apply the same HTML transformation that [`build`] performs before passing
 /// the document to wry. Used by `--watch` reloads (PRD §9.10) so the new HTML
 /// has the same CSP `<meta>` injected as the initial render.
@@ -237,6 +263,7 @@ pub fn prepare_html(html: &str, perms: &Permissions, raw_mode: bool) -> String {
 ///   - `with_navigation_handler` rejecting non-`about:` / non-`data:` top-level navigation
 ///   - On macOS, an initialization script disabling `navigator.clipboard`
 ///     (unless `perms.allow_clipboard`)
+///   - An initialization script enabling Cmd/Ctrl +/-/0 zoom (all platforms)
 ///
 /// CSP `<meta>` is injected into HTML unless `opts.raw_mode` is set AND
 /// no permission flag has been granted (PRD §19.5).
@@ -292,6 +319,10 @@ pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
             builder = builder.with_initialization_script(MACOS_CLIPBOARD_NEUTRALIZE);
         }
     }
+
+    // Cmd/Ctrl +/-/0 zoom (all platforms). Stacks on any earlier
+    // initialization script; wry accumulates user scripts across calls.
+    builder = builder.with_initialization_script(ZOOM_SCRIPT);
 
     builder.build(window)
 }
