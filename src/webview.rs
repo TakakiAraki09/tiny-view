@@ -119,6 +119,7 @@ pub fn inject_csp(html: &str, perms: &Permissions) -> String {
 /// JS-visible `navigator.clipboard` so scripts cannot read/write the
 /// clipboard programmatically. Cmd+C / Cmd+V via the native menu are
 /// out of scope and remain enabled (documented constraint).
+#[cfg(target_os = "macos")]
 const MACOS_CLIPBOARD_NEUTRALIZE: &str = "\
 try { Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: false }); } \
 catch (e) { try { navigator.clipboard = undefined; } catch (_) {} }";
