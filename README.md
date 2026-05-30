@@ -445,10 +445,12 @@ semver from them:
 | `fix: …`                                     | patch                                                 |
 | `feat: …`                                    | minor                                                 |
 | `feat!: …` or a `BREAKING CHANGE:` footer    | major                                                 |
-| `chore:` / `docs:` / `ci:` / `refactor:` / `test:` | no bump on their own (still listed in the changelog) |
+| anything else (`chore:` / `docs:` / `ci:` / `refactor:` / `test:`, or non-conventional) | patch (default) |
 
-The strongest bump among the unreleased commits wins, and `cargo-semver-checks` forces a major
-bump if the public API actually breaks regardless of the commit type.
+By default release-plz treats everything that isn't `feat` or breaking as a patch, so even a
+`chore:`-only batch yields a patch Release PR (all commits still appear in the changelog). The
+strongest bump among the unreleased commits wins, and `cargo-semver-checks` forces a major bump if
+the public API actually breaks regardless of the commit type.
 
 **Cutting a release:**
 

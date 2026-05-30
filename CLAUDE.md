@@ -125,9 +125,10 @@ release-plz は**コミットメッセージから次バージョンを自動算
 | `fix:` | patch | 1.0.**5** |
 | `feat:` | minor | 1.**1**.0 |
 | `feat!:` / `fix!:` / フッター `BREAKING CHANGE:` | major | **2**.0.0 |
-| `chore:` `docs:` `ci:` `refactor:` `test:` 等 | 単体では昇格しない（CHANGELOG には載る） | |
+| 上記以外（`chore:` `docs:` `ci:` `refactor:` `test:` / 非 conventional） | patch（デフォルト） | 1.0.**5** |
 
 - 複数コミットがあれば**最も強い bump が勝つ**。
+- release-plz のデフォルトでは `feat` / breaking 以外はすべて patch 扱いなので、`chore:` だけでも Release PR は patch bump を提案する（CHANGELOG には全コミットが載る）。`chore`/`docs` でリリースを切りたくない場合は `release-plz.toml` の設定が要る。
 - 加えて release-plz は `cargo-semver-checks` で実 API の破壊も検査し、コミットが patch でも API 破壊なら major に引き上げる。
 
 ### バージョン / タグ / Cargo.lock を手で触らない
