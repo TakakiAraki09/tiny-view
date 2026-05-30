@@ -139,10 +139,9 @@ release-plz は**コミットメッセージから次バージョンを自動算
 ### リリースフロー
 
 1. main に push → release-plz が単一の **Release PR**（version bump + CHANGELOG + Cargo.lock 同期）を自動で開く / 更新する
-2. リリースしたくなったら **Release PR をマージ**する。この時点では **crates.io には公開されない**（main に bump が乗るだけ）
-3. **Actions タブから "Release" workflow を手動実行**（`workflow_dispatch`）→ 初めて `cargo publish` + tag + GitHub Release が走る
+2. リリースしたくなったら **Release PR をマージ**する → そのマージ（main への push）で release-plz が **自動的に `cargo publish` + tag + GitHub Release** まで実行する
 
-crates.io のバージョンは不可逆（再公開不可）なので、publish だけは人間が明示的に dispatch するゲートにしている。
+**Release PR のマージ自体がリリースゲート**。マージは人間の明示操作なので、不可逆な crates.io publish（再公開不可）のゲートを兼ねる。手動 `workflow_dispatch` は廃止した（マージと二重のゲートで冗長だったため）。bump と Cargo.lock 同期は Release PR 上でレビューされてからマージされるので、publish 前に必ず人間の目を通る。
 
 ## ドキュメント
 
