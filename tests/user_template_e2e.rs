@@ -107,10 +107,19 @@ fn user_template_resolves_reads_and_injects() {
     );
     // The marker was substituted exactly once with the JSON literal.
     assert!(!out.contains(MARKER), "marker should be gone:\n{out}");
-    // The injected object carries the stdin input verbatim (JSON-encoded).
+    // The injected object carries the stdin input, with `<` / `>` escaped to
+    // `\uXXXX` (issue #29) so the inline <script> is not closed prematurely.
+    // The raw `</h1>` from the input must NOT survive in the composed HTML.
     assert!(
-        out.contains(r#""input":"<h1>Hello &amp; world</h1>""#),
-        "input not injected:\n{out}"
+        !out.contains("world</h1>"),
+        "raw `</h1>` from input leaked into composed HTML:\n{out}"
+    );
+    // The escaped form is present (`<` → `<`; we match the backslash-free
+    // `u003c` substring to stay clear of source-level escaping pitfalls). The
+    // surrounding text (incl. the literal `&amp;`) is preserved verbatim.
+    assert!(
+        out.contains("u003ch1") && out.contains("Hello &amp; world") && out.contains("u003c/h1"),
+        "escaped input not injected:\n{out}"
     );
     // stdin input has no file path, so `path` is null (PRD §14.2).
     assert!(
@@ -120,6 +129,38 @@ fn user_template_resolves_reads_and_injects() {
     assert!(
         out.contains(r#""title":"tinyview""#),
         "title missing:\n{out}"
+    );
+}
+
+#[test]
+fn injected_input_with_script_close_tag_does_not_break_html() {
+    // issue #29: input containing `</script>` previously closed the inline
+    // <script> carrying the injected literal, leaving `window.__TINYVIEW__`
+    // undefined and the page blank. The `<` must be escaped to `<`.
+    let home = home_with_template("custom", &template_with_marker());
+
+    let assert = dump_cmd(home.path())
+        .args(["-t", "custom"])
+        .write_stdin("before</script>after")
+        .assert()
+        .success();
+
+    let out = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    // The injected literal must NOT contain the raw `</script>` from the input.
+    // The template legitimately has its own `</script>` tags, so we anchor on
+    // the input's surrounding text: the sequence `before</script>after` (raw)
+    // must be absent, replaced by the escaped form.
+    assert!(
+        !out.contains("before</script>after"),
+        "raw `</script>` from input leaked into composed HTML:\n{out}"
+    );
+    // The escaped form is present. We match backslash-free substrings that sit
+    // just after each escape (`</script` / `>after`) to avoid
+    // source-level backslash pitfalls.
+    assert!(
+        out.contains("u003c/script") && out.contains("u003eafter"),
+        "escaped `</script>` not present in composed HTML:\n{out}"
     );
 }
 

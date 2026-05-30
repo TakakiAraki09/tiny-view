@@ -217,6 +217,15 @@ pub fn render(tpl: &TemplateRef, data: &InjectData<'_>) -> Result<String, Render
 }
 
 /// Build the JSON literal that replaces the marker.
+///
+/// The literal is injected verbatim into an inline `<script>` and evaluated as
+/// a JS object literal (`window.__TINYVIEW__ = {...}`). `serde_json` emits
+/// valid JSON but does NOT escape `<` `>` `/`, so a raw `</script>` in the
+/// input would close the script tag before JS runs, and the JS line
+/// terminators U+2028 / U+2029 would be syntax errors when evaluated as a JS
+/// literal. We post-escape those to `\uXXXX`; inside a JSON string literal they
+/// decode back to the original characters, so `__TINYVIEW__.input` is preserved
+/// with no information loss.
 fn build_literal(data: &InjectData<'_>) -> String {
     let payload = serde_json::json!({
         "input": data.input,
@@ -224,7 +233,12 @@ fn build_literal(data: &InjectData<'_>) -> String {
         "title": data.title,
         "path": data.path.and_then(|p| p.to_str()),
     });
-    payload.to_string()
+    payload
+        .to_string()
+        .replace('<', "\\u003c") // neutralize </script> and <!--
+        .replace('>', "\\u003e") // defensive companion to <
+        .replace('\u{2028}', "\\u2028") // JS line separator
+        .replace('\u{2029}', "\\u2029") // JS paragraph separator
 }
 
 /// Substitute the marker once. If the marker is missing emit a warning and
@@ -308,11 +322,19 @@ mod tests {
 
         // The marker should be gone, replaced exactly once.
         assert!(!out.contains(MARKER), "marker should have been substituted");
-        // Should contain a JSON object with our input.
+        // The raw `<` / `>` must not survive in the injected literal, otherwise
+        // the inline <script> could be closed prematurely by a `</...>` in the
+        // input. They are escaped to `\uXXXX`.
+        let literal = build_literal(&data);
         assert!(
-            out.contains(r#""input":"<h1>Hi</h1>""#),
-            "input not present in JSON literal: {out}"
+            !literal.contains('<') && !literal.contains('>'),
+            "raw angle brackets leaked into injected literal: {literal}"
         );
+        // The escapes are valid JSON, so the input is preserved with no loss:
+        // round-tripping the literal yields the original string.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&literal).expect("injected literal is valid JSON");
+        assert_eq!(parsed["input"], "<h1>Hi</h1>");
         // Title is propagated.
         assert!(out.contains(r#""title":"tinyview""#));
         // Path null when no path.
@@ -425,8 +447,65 @@ mod tests {
         assert!(!out.contains(MARKER));
         assert!(!out.contains(LIB_MERMAID));
         assert!(out.contains("mermaid"), "mermaid.js not inlined");
-        assert!(out.contains(r#""input":"graph TD; A-->B""#));
+        // `>` in the input (`A-->B`) is escaped to `>`; the round-tripped
+        // literal still recovers the original string.
+        let literal = build_literal(&data);
+        assert!(!literal.contains('>'), "raw `>` leaked: {literal}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&literal).expect("injected literal is valid JSON");
+        assert_eq!(parsed["input"], "graph TD; A-->B");
         assert!(!out.contains("<script src="));
+    }
+
+    // issue #29: input containing `</script>` must not prematurely close the
+    // inline <script> that carries the injected literal.
+    #[test]
+    fn build_literal_escapes_script_close_tag() {
+        let params = empty_map();
+        let data = InjectData {
+            input: "before</script>after",
+            params: &params,
+            title: "t",
+            path: None,
+        };
+        let literal = build_literal(&data);
+        // No raw `</script>` (nor any bare `<`) survives in the literal.
+        assert!(
+            !literal.contains("</script>") && !literal.contains('<'),
+            "raw `</script>` leaked into literal: {literal}"
+        );
+        // The escapes are valid JSON, so the input is preserved losslessly.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&literal).expect("injected literal is valid JSON");
+        assert_eq!(parsed["input"], "before</script>after");
+    }
+
+    // issue #29: the JS line terminators U+2028 / U+2029 are valid in JSON
+    // strings but are syntax errors when the literal is evaluated as a JS
+    // object literal. They must be escaped to `\uXXXX`.
+    #[test]
+    fn build_literal_escapes_js_line_terminators() {
+        // Build the input from code points to avoid embedding raw separators.
+        let ls = char::from_u32(0x2028).unwrap(); // LINE SEPARATOR
+        let ps = char::from_u32(0x2029).unwrap(); // PARAGRAPH SEPARATOR
+        let input = format!("line1{ls}line2{ps}line3");
+        let params = empty_map();
+        let data = InjectData {
+            input: &input,
+            params: &params,
+            title: "t",
+            path: None,
+        };
+        let literal = build_literal(&data);
+        // Raw separators must not appear; they are escaped to their JS form.
+        assert!(
+            !literal.contains(ls) && !literal.contains(ps),
+            "raw JS line terminator leaked into literal: {literal}"
+        );
+        // Input recovered losslessly via valid JSON escapes.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&literal).expect("injected literal is valid JSON");
+        assert_eq!(parsed["input"], input);
     }
 
     #[test]
