@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>tinyview</title>
+<style>
+:root{color-scheme:light dark}
+html,body{margin:0;padding:0;height:100%;background:Canvas;color:CanvasText}
+body{font:13px/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+pre{margin:0;padding:16px;min-height:100%;box-sizing:border-box;
+  white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:4}
+</style>
+<script>window.__TINYVIEW__ = /*__TINYVIEW__*/ null /*__TINYVIEW__*/;</script>
+<script>
+(function(){
+  var d=window.__TINYVIEW__||{};
+  var el=document.createElement("pre");
+  el.textContent=(d.input==null)?"":String(d.input);
+  if(d.title)document.title=d.title;
+  var attach=function(){document.body.appendChild(el)};
+  if(document.body){attach()}else{document.addEventListener("DOMContentLoaded",attach,{once:true})}
+})();
+</script>
+</head>
+<body></body>
+</html>

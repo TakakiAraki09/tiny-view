@@ -1,9 +1,11 @@
 # TinyView PRD
 
-**Version:** v0.1
-**Status:** Draft Final
+**Version:** v0.2
+**Status:** Draft
 **Product Type:** CLI-first transient WebView runtime
 **Core Value:** サーバーなし、ポートなし、物理プレビュー生成なしで、CLIから即座にWeb UIを表示する
+
+> v0.2 での主要変更: Template System を「placeholder runtime + multi-file directory」から「単一HTML + `window.__TINYVIEW__` 注入」に簡素化（§10 / §11.2 / §14）。
 
 ---
 
@@ -233,6 +235,28 @@ GUIアプリとしての設定画面やタブUIは持たない。
 
 ---
 
+## 6.7 Non-blocking CLI
+
+TinyView は launch 後 **ただちに shell プロンプトへ制御を返す**。WebView ウィンドウは親プロセスから切り離されて独立に動作する。
+
+```bash
+echo '<h1>x</h1>' | tinyview
+$ █  # ← 即座に次コマンド入力可
+```
+
+これを破ると CLI tool としての composability が著しく損なわれる（`open file.png` / `xdg-open` と同じ UX を期待される）。
+
+実装は **detach-by-default**:
+
+- Unix: `fork()` → `setsid()` → 親は即 `exit 0`、子が WebView を保持
+- Windows: 自身を `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS` で再 spawn し、親プロセスは即終了
+
+stdin / file / config / template 解決・HTML 合成は **すべて親プロセスで完了させる**。検証エラーは親が non-zero exit で返すため shell から検出可能。fork 後のエラーは WebView 内に表示するか、silent exit する。
+
+`--foreground` フラグで明示的に前景維持も可能（`--watch` で Ctrl+C kill したい / CI / debug 用途）。
+
+---
+
 # 7. 想定ユーザー
 
 ## 7.1 Primary User
@@ -377,13 +401,37 @@ tinyview app.html --transparent
 tinyview README.md --watch
 ```
 
-watch mode は file input 時のみ有効。
+watch mode は **file input 時のみ有効**（stdin / `--html` と併用するとエラー、exit code 2）。
+
+**`--watch` は `--foreground` を暗黙的に強制する**。detach すると親→子へ source path / template / params を渡す protocol が必要で複雑化するため。watch はインタラクティブ用途（ユーザーが編集しながら更新を見る）であり foreground で十分。Ctrl+C で kill 可能。
+
+ファイル更新検出は `notify` + `notify-debouncer-mini` で行い、**100ms trailing debounce** を適用する（VSCode / Vim / IntelliJ の atomic save パターンに対応）。検出時は入力を再読込し、同じ template で再 render（template は再 resolve しない）して `WebView::load_html()` で content swap する。WebView 自体は破棄せず維持するため、スクロール位置・focus は reset される（PRD §9.10 の ephemeral 思想と整合）。
+
+CSP `<meta>` 注入は reload 時にも適用される（template HTML が CSP を持たない前提のため、毎回 runtime が注入する責務を持つ）。
+
+実装上の注意: macOS FSEvents は親ディレクトリ単位のイベントのみを返すため、reader 側で `event.paths` と target path の一致確認が必須。さらに atomic save (`write tempfile + rename`) で inode が変わるパターンに対応するため、**target ファイル自体ではなく親ディレクトリを `RecursiveMode::NonRecursive` で watch する** 実装にすること。
+
+## 9.11 Foreground mode
+
+```bash
+tinyview app.html --foreground
+```
+
+デフォルトでは launch 後 shell に制御を返す（§6.7）。`--foreground` を指定すると detach せず前景に留まる。Ctrl+C で kill したい CI / debug 用途で使う。
+
+`--watch` は §9.10 のとおり `--foreground` を暗黙的に強制するため、`tinyview README.md --watch` は明示的な `--foreground` 指定不要。
 
 ---
 
 # 10. Template System
 
-TinyView は単なるHTML viewerではなく、入力をWebView向けHTMLへ変換する **template runtime** を持つ。
+TinyView の template は **単一HTMLファイル** である。Runtime は独自の template 言語を持たず、template に対して以下を1箇所だけ注入する：
+
+```text
+window.__TINYVIEW__ = { input, params, title, path }
+```
+
+これにより、Rust 側の処理は実質「1回の文字列置換」に縮退し、複雑な template engine / placeholder 文法 / asset inlining / path 解決ロジックを持たない。
 
 基本構造：
 
@@ -392,14 +440,14 @@ input
 ↓
 template resolve
 ↓
-template compile
+inject window.__TINYVIEW__ (single marker substitution)
 ↓
 single HTML string
 ↓
 WebView inject
 ```
 
-最終的には必ず **単一HTML文字列** に変換してWebViewへ渡す。
+`raw` mode では substitution も発生せず、入力 HTML をそのまま WebView へ渡す（最速パス）。
 
 ---
 
@@ -427,27 +475,13 @@ $XDG_CONFIG_HOME/tinyview/
 ~/.tinyview/
 ├── config.toml
 └── templates/
-    ├── markdown/
-    │   ├── template.toml
-    │   ├── template.html
-    │   ├── style.css
-    │   └── marked.min.js
-    │
-    ├── mermaid/
-    │   ├── template.toml
-    │   ├── template.html
-    │   └── mermaid.min.js
-    │
-    ├── code/
-    │   ├── template.toml
-    │   ├── template.html
-    │   ├── style.css
-    │   └── highlight.min.js
-    │
-    └── custom-layout/
-        ├── template.toml
-        └── template.html
+    ├── markdown.html
+    ├── mermaid.html
+    ├── code.html
+    └── custom-layout.html
 ```
+
+各 template は **自己完結した単一HTMLファイル**である。CSS / JS / library (例: `marked.js`) は `<style>` / `<script>` として template 内に inline する。外部ファイル参照 (`<link href>` / `<script src>`) は no server / no port 原則により解決できないため禁止。
 
 ---
 
@@ -494,24 +528,52 @@ default_template
 raw
 ```
 
+## 13.1 raw mode の最速パス
+
+`raw` が選ばれた場合、TinyView は以下を **すべて skip** して `WebView::load_html(&input)` に直行する:
+
+- `~/.tinyview/config.toml` の読み込み
+- `--param` の評価（**raw mode では `--param` は無視される**）
+- `window.__TINYVIEW__` JSON literal の生成
+- template ファイルの load と marker substitution
+
+これは §16 起動目標 (<150ms) を満たすための最短経路である。`--param` を反映させたい場合は `text` / `minimal` / カスタム template を明示すること。
+
 ---
 
-# 14. Template HTML仕様
+# 14. Template Contract
 
-Template HTML は最終的に単一HTMLへコンパイルされる。
+TinyView は **template engine / placeholder 文法を持たない**。Template HTML は1箇所のマーカーを介して runtime からデータを受け取る。
 
-## Reserved placeholders
+## 14.1 Injection Marker
 
-| Placeholder                     | 内容                |
-| ------------------------------- | ------------------- |
-| `{{ input.json }}`              | 入力文字列          |
-| `{{ input.html }}`              | HTML escape済み入力 |
-| `{{ title }}`                   | title               |
-| `{{ path }}`                    | 元path              |
-| `{{ params.json }}`             | params              |
-| `{{ inline_css("style.css") }}` | CSS inline          |
-| `{{ inline_js("script.js") }}`  | JS inline           |
-| `{{ asset_url("image.png") }}`  | data URL化          |
+Template はどこか1箇所（慣習的に `<head>` 内）に以下を含む：
+
+```html
+<script>
+  window.__TINYVIEW__ = /*__TINYVIEW__*/ null /*__TINYVIEW__*/;
+</script>
+```
+
+Runtime はこのマーカー（`/*__TINYVIEW__*/ null /*__TINYVIEW__*/`）を1回の文字列置換で JSON literal に差し替える。マーカーが存在しない場合は警告のみで続行する（raw 用途）。
+
+## 14.2 Injected Object
+
+```ts
+window.__TINYVIEW__ = {
+  input: string, // 入力本体（stdin / file / --html のいずれか）
+  params: Record<string, string>, // --param k=v および config の [templates.X.params]
+  title: string,
+  path: string | null, // file 入力時のみ。stdin / inline は null
+};
+```
+
+## 14.3 Template の責務
+
+- **HTML escape は template 側 JS の責任**。`element.textContent = window.__TINYVIEW__.input` の形で安全に注入する
+- **CSS / JS / library は template 内に inline**。`<style>...</style>` / `<script>...</script>` に直接埋め込む
+- **外部リソース禁止**。`<link rel="stylesheet" href="...">` / `<script src="...">` は server を持たないため解決できない
+- **描画ロジックを template 側に置く**。Rust 側は markdown / mermaid 等のパースを行わない
 
 ---
 
@@ -519,11 +581,15 @@ Template HTML は最終的に単一HTMLへコンパイルされる。
 
 ## MVP Built-ins
 
-| Template  | 内容         |
-| --------- | ------------ |
-| `raw`     | HTMLそのまま |
-| `text`    | plain text   |
-| `minimal` | 最小shell    |
+| Template  | 内容         | 実装形態                                                                                                                                          |
+| --------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `raw`     | HTMLそのまま | **テンプレートファイル無し**。resolver が `raw` を返したら load も substitution も skip し、入力をそのまま `WebView::load_html()` へ渡す（§13.1） |
+| `text`    | plain text   | 単一HTMLファイルとして `include_str!("text.html")` でバイナリ同梱（~1.2KB）                                                                       |
+| `minimal` | 最小shell    | 単一HTMLファイルとして `include_str!("minimal.html")` でバイナリ同梱（~1.2KB）                                                                    |
+
+- `text`: `<pre>` + `pre-wrap` + `ui-monospace` font stack。`textContent` で安全注入（HTML として解釈しない）
+- `minimal`: `<main>` 中央寄せ + max-width 760px。`innerHTML` で `<html><head><body>` を持たない HTML fragment を流す（AI 生成 HTML の主要ユースケース）。**信頼境界は呼び出し側にある**（`<script>` がそのまま実行される）
+- 両 template ともに `color-scheme: light dark` + system color で OS ダークモード追従。Web font は使わない（no server / 起動遅延 / ephemeral すべてに違反）
 
 ## Optional Built-ins
 
@@ -533,7 +599,7 @@ Template HTML は最終的に単一HTMLへコンパイルされる。
 | `mermaid`  | Mermaid preview  |
 | `code`     | Syntax highlight |
 
-重いtemplate assetは lazy load する。
+重いtemplate assetは lazy load する。これらは `~/.tinyview/templates/<name>.html` に必要な library (`marked.min.js` 等) を `<script>` で inline 同梱する形で配布する。
 
 ---
 
@@ -591,49 +657,108 @@ tao
 ## Runtime Flow
 
 ```text
+[parent process]
 CLI start
 ↓
-parse args
+parse args (clap, feature絞り)
 ↓
-read input
+read input (stdin > file > --html)            ← stdin はここで全消費
 ↓
-load config
+load config (lazy: rawパスでは呼ばない)
 ↓
-resolve template
+resolve template (explicit > ext > default > raw)
 ↓
-compile single HTML
+substitute __TINYVIEW__ marker (rawではスキップ)
 ↓
-create WebView
+[validate complete — ここまでで失敗したら non-zero exit]
 ↓
-inject HTML
+fork & detach (--foreground 指定時はスキップ)  ← §6.7
+        │
+        ├──→ [parent] exit 0 immediately
+        │
+        ▼
+[child process]
+create WebView (wry + tao)
 ↓
-show window
+inject HTML (load_html, no temp file)
+↓
+[--watch のみ] spawn notify watcher thread
+↓
+event loop
 ↓
 close
 ↓
-exit
+exit (全state破棄)
 ```
+
+## 主要依存
+
+| 領域              | 採用                                                                                                                                                | 備考                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| WebView / window  | `wry` + `tao`                                                                                                                                       | OS ネイティブ WebView 直叩き                                                                                        |
+| CLI parse         | `clap`                                                                                                                                              | `default-features = false`, `derive` + `help` + `usage` + `error-context` のみ                                      |
+| Config / params   | `serde` + `toml`                                                                                                                                    | config が必要なときだけロード                                                                                       |
+| JSON 注入         | `serde_json`                                                                                                                                        | `window.__TINYVIEW__` の literal 生成                                                                               |
+| Watch (`--watch`) | `notify` + `notify-debouncer-mini`（常時リンク、Cargo feature `watch` default=on）                                                                  | 起動時 init しないため raw path への runtime cost ~0。バイナリ +~200KB。組み込み版用に feature off の逃げ道だけ残す |
+| Template engine   | **なし**                                                                                                                                            | `str::replace` 1回で完結                                                                                            |
+| Detach (Unix)     | `libc::fork` + `libc::setsid`                                                                                                                       | runtime cost ~1-3ms。`--foreground` でスキップ可                                                                    |
+| Detach (Windows)  | `std::os::windows::process::CommandExt` で `DETACHED_PROCESS \| CREATE_NEW_PROCESS_GROUP` 指定して self-respawn、合成済み HTML を子の stdin へ pipe | 同上                                                                                                                |
 
 ---
 
 # 19. Security Model
 
-## Default
+## 19.1 デフォルト拒否ポリシー
 
-TinyView は以下を提供しない。
+TinyView は以下をデフォルトで提供しない。
 
-- native bridge
+- native bridge / JS ↔ Rust IPC
 - shell execution
 - filesystem access from JS
 - Node.js API
+- DevTools（debug build を除く）
+- 外部 HTTP/HTTPS リクエスト（`fetch` / XHR / WebSocket）
+- Clipboard API（macOS は OS 制約により完全拒否不可、§19.3 参照）
+- 永続ストレージ（localStorage / IndexedDB / Cookie / HTTP cache）
+- top-level の外部 URL 遷移
 
-## Optional Permissions
+## 19.2 Optional Permissions
 
 ```bash
 tinyview app.html --allow-fetch
 tinyview app.html --allow-clipboard
 tinyview app.html --allow-storage
 ```
+
+| フラグ              | runtime 動作                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `--allow-fetch`     | 注入 CSP の `connect-src` を `'none'` から `https: http: ws: wss:` に緩和                      |
+| `--allow-clipboard` | wry `with_clipboard(true)`（macOS では既にOS側で許可されており差分なし）                       |
+| `--allow-storage`   | wry `with_incognito(false)` + `WebContext` を永続パスで構成。プロセス終了後も DataStore が残る |
+
+## 19.3 Ephemeral 実装上の必須要件
+
+PRD §6.4「閉じたら全破棄」を実装で守るため、以下を **runtime のデフォルト** として組み込む。`--allow-*` 指定で対応スライスのみ緩和される。
+
+- **`WebViewBuilder::with_incognito(true)` をデフォルト ON**
+  - 未指定で起動すると wry は `%LOCALAPPDATA%\<exe>\EBWebView`（Windows）/ `~/Library/WebKit/...`（macOS）等にデータをディスク永続させる → ephemeral 違反
+  - **WebView2 では runtime 101+ 必須**。古い環境では `build()` が失敗する可能性があるため、検出時は一時 data directory を割り当て、プロセス終了時 (`Drop` / `atexit` 相当) に削除する fallback 経路を用意する
+- **`WebViewBuilder::with_devtools(false)` をデフォルト ON**（debug build のみ true）
+- **`WebViewBuilder::with_clipboard(false)` をデフォルト ON**
+  - Linux / Windows では実効
+  - **macOS WKWebView は OS 標準で常時 ON のため API レベルで拒否できない**。`navigator.clipboard` を `with_initialization_script` で `undefined` にする補強を入れるが、ネイティブショートカット (Cmd+C/V) は塞げない。この事実は仕様上の制約として受容する
+- **`with_navigation_handler` で top-level 外部遷移を拒否**（`about:` / `data:` のみ許可）
+- **CSP `<meta http-equiv>` を runtime が HTML へ注入する**
+  - デフォルト: `default-src 'self' 'unsafe-inline' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`
+  - `'unsafe-inline'` を許容するのは Template Contract (§14.3) が CSS/JS の inline を要求するため。代替に nonce 方式があるが起動コスト増のため不採用
+
+## 19.4 Template と CSP の境界
+
+CSP は runtime が排他的に管理する。**Template HTML 側に `<meta http-equiv="Content-Security-Policy">` を書いてはならない**。両方が存在すると最も制限的な値が勝ち、template が想定外に壊れる。
+
+## 19.5 raw mode と Security
+
+`raw` mode (§13.1) でも §19.3 の WebView builder デフォルト (incognito / devtools / clipboard / navigation_handler) は適用される。ただし CSP `<meta>` 注入は起動最速優先のため **skip する** — raw mode の利用者は信頼できる入力を流す責務を負う。`--allow-*` フラグが指定された場合のみ CSP 注入が走る。
 
 ---
 
@@ -651,7 +776,7 @@ tinyview app.html --allow-storage
 - no port
 - no generated preview file
 - config.toml
-- template runtime
+- single-file template + `window.__TINYVIEW__` 注入
 
 ## MVP外
 
