@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1](https://github.com/TakakiAraki09/tiny-view/compare/v1.1.0...v1.1.1) - 2026-05-30
+
+### Other
+
+- auto-publish on Release PR merge, drop manual dispatch gate
+
 ## [1.1.0](https://github.com/TakakiAraki09/tiny-view/compare/v1.0.4...v1.1.0) - 2026-05-30
 
 ### Added
