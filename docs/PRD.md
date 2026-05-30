@@ -401,11 +401,15 @@ tinyview app.html --transparent
 tinyview README.md --watch
 ```
 
-watch mode は file input 時のみ有効。
+watch mode は **file input 時のみ有効**（stdin / `--html` と併用するとエラー、exit code 2）。
 
-ファイル更新検出は `notify` + `notify-debouncer-mini` で行い、**100ms trailing debounce** を適用する（VSCode / Vim / IntelliJ の atomic save パターンに対応）。検出時は入力を再読込し、template marker を再 substitute して `WebView::load_html()` で content swap する。WebView 自体は破棄せず維持するため、スクロール位置・focus は reset される。
+**`--watch` は `--foreground` を暗黙的に強制する**。detach すると親→子へ source path / template / params を渡す protocol が必要で複雑化するため。watch はインタラクティブ用途（ユーザーが編集しながら更新を見る）であり foreground で十分。Ctrl+C で kill 可能。
 
-実装上の注意: macOS FSEvents は親ディレクトリ単位のイベントのみを返すため、reader 側で `event.paths` と target path の一致確認が必須。
+ファイル更新検出は `notify` + `notify-debouncer-mini` で行い、**100ms trailing debounce** を適用する（VSCode / Vim / IntelliJ の atomic save パターンに対応）。検出時は入力を再読込し、同じ template で再 render（template は再 resolve しない）して `WebView::load_html()` で content swap する。WebView 自体は破棄せず維持するため、スクロール位置・focus は reset される（PRD §9.10 の ephemeral 思想と整合）。
+
+CSP `<meta>` 注入は reload 時にも適用される（template HTML が CSP を持たない前提のため、毎回 runtime が注入する責務を持つ）。
+
+実装上の注意: macOS FSEvents は親ディレクトリ単位のイベントのみを返すため、reader 側で `event.paths` と target path の一致確認が必須。さらに atomic save (`write tempfile + rename`) で inode が変わるパターンに対応するため、**target ファイル自体ではなく親ディレクトリを `RecursiveMode::NonRecursive` で watch する** 実装にすること。
 
 ## 9.11 Foreground mode
 
@@ -413,7 +417,9 @@ watch mode は file input 時のみ有効。
 tinyview app.html --foreground
 ```
 
-デフォルトでは launch 後 shell に制御を返す（§6.7）。`--foreground` を指定すると detach せず前景に留まる。Ctrl+C で kill したい watch / CI / debug 用途で使う。
+デフォルトでは launch 後 shell に制御を返す（§6.7）。`--foreground` を指定すると detach せず前景に留まる。Ctrl+C で kill したい CI / debug 用途で使う。
+
+`--watch` は §9.10 のとおり `--foreground` を暗黙的に強制するため、`tinyview README.md --watch` は明示的な `--foreground` 指定不要。
 
 ---
 

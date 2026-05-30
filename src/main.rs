@@ -7,15 +7,17 @@ use std::process::ExitCode;
 use clap::Parser;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoop};
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
 
 mod config;
 mod detach;
 mod template;
+mod watch;
 mod webview;
 
 use template::TemplateRef;
+use watch::UserEvent;
 use webview::{BuildOptions, Permissions};
 
 #[derive(Parser)]
@@ -48,6 +50,11 @@ struct Cli {
     #[arg(long)]
     foreground: bool,
 
+    /// Watch the source file for changes and reload the WebView (file input only).
+    /// Implies `--foreground`.
+    #[arg(long)]
+    watch: bool,
+
     /// Allow outbound fetch / XHR / WebSocket (relaxes CSP connect-src)
     #[arg(long)]
     allow_fetch: bool,
@@ -75,7 +82,11 @@ struct Input {
 
 fn read_input(cli: &Cli) -> io::Result<Input> {
     let stdin = io::stdin();
-    if !stdin.is_terminal() {
+    // Prefer stdin only when (a) it's not a terminal AND (b) it actually has
+    // data ready. This avoids accidentally consuming an empty `/dev/null` stdin
+    // (e.g. background jobs, cron, sandboxed shells) when the user provided an
+    // explicit file or --html argument.
+    if !stdin.is_terminal() && stdin_has_data() {
         let mut buf = String::new();
         stdin.lock().read_to_string(&mut buf)?;
         return Ok(Input {
@@ -100,6 +111,23 @@ fn read_input(cli: &Cli) -> io::Result<Input> {
         io::ErrorKind::InvalidInput,
         "no input: pipe stdin, pass a file, or use --html",
     ))
+}
+
+/// FIONREAD ioctl: returns true if stdin has at least one byte ready to read.
+/// Used to distinguish `cat file | tinyview` (data ready) from `tinyview &`
+/// (stdin redirected to /dev/null with no data).
+#[cfg(unix)]
+fn stdin_has_data() -> bool {
+    use std::os::fd::AsRawFd;
+    let mut bytes: libc::c_int = 0;
+    // SAFETY: FIONREAD on a valid fd is well-defined; we pass a writable int.
+    let r = unsafe { libc::ioctl(io::stdin().as_raw_fd(), libc::FIONREAD, &mut bytes) };
+    r == 0 && bytes > 0
+}
+
+#[cfg(not(unix))]
+fn stdin_has_data() -> bool {
+    true
 }
 
 /// PRD §13.1: raw fast path skips config load entirely.
@@ -152,14 +180,24 @@ fn merge_params(
 
 /// Launch the WebView and run the event loop. Diverges on macOS
 /// (`event_loop.run` is `-> !`).
+///
+/// If `watch_ctx` is `Some`, a notify watcher is spawned that re-renders the
+/// source file on change and forwards a `UserEvent::Reload` through the
+/// event loop proxy. The watcher guard is held inside this function so it
+/// lives exactly as long as the event loop.
 fn launch_webview(
     width: u32,
     height: u32,
     html: String,
     perms: Permissions,
     raw_mode: bool,
+    watch_ctx: Option<watch::WatchContext>,
 ) -> ExitCode {
-    let event_loop = EventLoop::new();
+    // Always use `EventLoop<UserEvent>` — even when watch is off — so the
+    // event-loop closure type is uniform and we avoid duplicating the run
+    // body for two different event types.
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+
     let window = match WindowBuilder::new()
         .with_title("tinyview")
         .with_inner_size(LogicalSize::new(width as f64, height as f64))
@@ -172,7 +210,7 @@ fn launch_webview(
         }
     };
 
-    let _webview = match webview::build(
+    let webview = match webview::build(
         &window,
         BuildOptions {
             html: &html,
@@ -187,14 +225,39 @@ fn launch_webview(
         }
     };
 
+    // Spawn the notify watcher (if requested). The returned guard must
+    // outlive `event_loop.run` — moved into the closure below.
+    let _watcher_guard = match watch_ctx {
+        Some(ctx) => match watch::spawn_watcher(ctx, event_loop.create_proxy()) {
+            Ok(g) => Some(g),
+            Err(e) => {
+                // Non-fatal: log and continue without watch. The user still
+                // gets a working WebView; only auto-reload is lost.
+                eprintln!("tinyview: warn: failed to start file watcher: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } = event
-        {
-            *control_flow = ControlFlow::Exit;
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::UserEvent(UserEvent::Reload(new_html)) => {
+                // Re-apply the same CSP `<meta>` injection as the initial
+                // render so reloads don't drop security headers (PRD §19).
+                let prepared = webview::prepare_html(&new_html, &perms, raw_mode);
+                if let Err(e) = webview.load_html(&prepared) {
+                    eprintln!("tinyview: warn: load_html failed: {e}");
+                }
+            }
+            _ => {}
         }
     });
 }
@@ -216,7 +279,7 @@ fn run_as_child(cli: Cli) -> ExitCode {
         allow_storage: cli.allow_storage,
     };
 
-    launch_webview(width, height, html, perms, raw_mode)
+    launch_webview(width, height, html, perms, raw_mode, None)
 }
 
 /// Parent / foreground path: full pipeline including template resolution.
@@ -228,6 +291,15 @@ fn run(cli: Cli) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    // `--watch` is only meaningful for file input (PRD §9.10). Stdin is a
+    // one-shot stream and `--html` is an inline literal — neither has a path
+    // we can watch. Reject early with a clear error rather than silently
+    // ignoring the flag.
+    if cli.watch && input.path.is_none() {
+        eprintln!("tinyview: --watch requires a file path (stdin / --html not supported)");
+        return ExitCode::from(2);
+    }
 
     let cfg_cache: OnceCell<Option<config::Config>> = OnceCell::new();
     let cfg = if is_raw_fast_path(&cli, &input) {
@@ -280,8 +352,26 @@ fn run(cli: Cli) -> ExitCode {
         allow_storage: cli.allow_storage,
     };
 
-    if cli.foreground {
-        return launch_webview(width, height, html, perms, raw_mode);
+    // `--watch` implies foreground: detaching would require a parent→child
+    // protocol to ferry source/template/params, which we explicitly avoid
+    // (see PRD §9.10 — watch is for interactive use, foreground is fine).
+    let foreground = cli.foreground || cli.watch;
+
+    if foreground {
+        let watch_ctx = if cli.watch {
+            // SAFETY of unwrap: validated above (`cli.watch && input.path.is_none()`
+            // returns early), so `input.path` is `Some` here.
+            let source = input.path.clone().expect("watch validated above");
+            Some(watch::WatchContext {
+                source,
+                template: tpl.clone(),
+                params: merged_params.clone(),
+                raw_mode,
+            })
+        } else {
+            None
+        };
+        return launch_webview(width, height, html, perms, raw_mode, watch_ctx);
     }
 
     // Detach: spawn ourselves as a detached child via Command::spawn,

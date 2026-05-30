@@ -114,6 +114,22 @@ const MACOS_CLIPBOARD_NEUTRALIZE: &str = "\
 try { Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: false }); } \
 catch (e) { try { navigator.clipboard = undefined; } catch (_) {} }";
 
+/// Apply the same HTML transformation that [`build`] performs before passing
+/// the document to wry. Used by `--watch` reloads (PRD §9.10) so the new HTML
+/// has the same CSP `<meta>` injected as the initial render.
+///
+/// Mirrors the `inject_csp_now` rule in [`build`]: CSP is injected unless
+/// `raw_mode` is set AND no permission flag has been granted.
+pub fn prepare_html(html: &str, perms: &Permissions, raw_mode: bool) -> String {
+    let any_perm = perms.allow_fetch || perms.allow_clipboard || perms.allow_storage;
+    let inject = !raw_mode || any_perm;
+    if inject {
+        inject_csp(html, perms)
+    } else {
+        html.to_string()
+    }
+}
+
 /// Build a `WebView` with TinyView's ephemeral defaults applied.
 ///
 /// Defaults applied unconditionally:
