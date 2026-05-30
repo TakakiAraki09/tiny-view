@@ -90,6 +90,68 @@ fn predefined(item: crate::shortcuts::MenuItem) -> muda::PredefinedMenuItem {
     }
 }
 
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::predefined;
+    use crate::shortcuts::{MenuItem, MENU_LAYOUT};
+
+    // `predefined` builds a `muda::PredefinedMenuItem`. This is safe on cargo
+    // test's worker thread (not the process main thread): muda defers
+    // NSMenuItem allocation until the item is appended to a menu, so
+    // construction needs no `MainThreadMarker`. Only `install` (which appends
+    // and calls `init_for_nsapp`) requires the main thread, and that is the
+    // GUI-launch path, exercised by the smoke run rather than here.
+
+    /// Each [`MenuItem`] maps to the *intended* predefined action. The
+    /// exhaustive match in [`predefined`] guarantees every variant is handled,
+    /// but not that the mapping is correct — a typo like `Quit => copy(None)`
+    /// compiles cleanly. We pin the mapping via each item's default label
+    /// (`text()`), which muda derives from the predefined type. Labels carry an
+    /// `&` mnemonic in muda's table but `text()` returns it stripped.
+    #[test]
+    fn each_item_maps_to_the_expected_action() {
+        // (item, substring expected in the predefined item's default label)
+        let cases = [
+            (MenuItem::About, "About"),
+            (MenuItem::Hide, "Hide"),
+            (MenuItem::HideOthers, "Hide Others"),
+            (MenuItem::ShowAll, "Show All"),
+            (MenuItem::Quit, "Quit"),
+            (MenuItem::Cut, "Cut"),
+            (MenuItem::Copy, "Copy"),
+            (MenuItem::Paste, "Paste"),
+            (MenuItem::SelectAll, "Select All"),
+            (MenuItem::Fullscreen, "Full Screen"),
+            (MenuItem::Minimize, "Minimize"),
+            (MenuItem::CloseWindow, "Close"),
+        ];
+        for (item, expected) in cases {
+            let text = predefined(item).text();
+            assert!(
+                text.contains(expected),
+                "{item:?} mapped to an item labeled {text:?}; expected it to contain {expected:?}"
+            );
+        }
+    }
+
+    /// Building a predefined item for every entry actually used in the layout
+    /// (including `Separator` and the `About`-metadata path) must not panic.
+    #[test]
+    fn builds_every_layout_item() {
+        for section in MENU_LAYOUT {
+            for &item in section.items {
+                let _ = predefined(item);
+            }
+        }
+    }
+
+    /// A separator is a divider, so it carries no label.
+    #[test]
+    fn separator_has_empty_label() {
+        assert!(predefined(MenuItem::Separator).text().is_empty());
+    }
+}
+
 /// Zero-sized guard returned by the non-macOS [`install`] stub. Exists so the
 /// call site (`let guard = menu::install();`) stays platform-uniform and does
 /// not bind a unit value (which would trip `clippy::let_unit_value` under the
