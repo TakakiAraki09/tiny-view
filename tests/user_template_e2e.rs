@@ -53,17 +53,23 @@ fn home_with_template(name: &str, body: &str) -> TempDir {
     home
 }
 
-/// Build a `tinyview` command pinned to a temp `HOME`, with the dump hook on
-/// and stdin closed (so `--html` input wins over an accidental stdin pipe).
+/// Build a `tinyview` command pinned to a temp `HOME`, with the dump hook on.
+///
+/// Stdin is intentionally NOT wired here. Tests that assert on injected
+/// input/param values feed HTML over stdin (TinyView's #1 input source on every
+/// platform — see `read_input` in `src/main.rs`), which is the only
+/// cross-platform-robust way to guarantee the HTML reaches the binary: on
+/// non-unix targets `stdin_has_data()` is a conservative `true`, so an empty
+/// `--write_stdin("")` pipe would be consumed as empty input and `--html` would
+/// be ignored. Tests whose assertion is independent of the input value (marker
+/// pass-through, missing-file) close stdin and rely on `--html` instead.
 fn dump_cmd(home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("tinyview").expect("locate tinyview binary");
     cmd.env("HOME", home)
         // Force config_root() onto the legacy `~/.tinyview` chain regardless of
         // the developer's / runner's real XDG env (config.rs::config_root).
         .env_remove("XDG_CONFIG_HOME")
-        .env("TINYVIEW_DUMP_HTML", "1")
-        // Closed stdin → stdin_has_data() is false → `--html` is used as input.
-        .write_stdin("");
+        .env("TINYVIEW_DUMP_HTML", "1");
     cmd
 }
 
@@ -84,8 +90,11 @@ fn user_template_resolves_reads_and_injects() {
     // ~/.tinyview/templates/custom.html → resolve → read → inject.
     let home = home_with_template("custom", &template_with_marker());
 
+    // Feed the input over stdin (input source #1 on every platform) so the
+    // assertion on the injected value is cross-platform-robust; see `dump_cmd`.
     let assert = dump_cmd(home.path())
-        .args(["--html", "<h1>Hello &amp; world</h1>", "-t", "custom"])
+        .args(["-t", "custom"])
+        .write_stdin("<h1>Hello &amp; world</h1>")
         .assert()
         .success();
 
@@ -98,12 +107,12 @@ fn user_template_resolves_reads_and_injects() {
     );
     // The marker was substituted exactly once with the JSON literal.
     assert!(!out.contains(MARKER), "marker should be gone:\n{out}");
-    // The injected object carries the `--html` input verbatim (JSON-encoded).
+    // The injected object carries the stdin input verbatim (JSON-encoded).
     assert!(
         out.contains(r#""input":"<h1>Hello &amp; world</h1>""#),
         "input not injected:\n{out}"
     );
-    // `--html` input has no file path, so `path` is null (PRD §14.2).
+    // stdin input has no file path, so `path` is null (PRD §14.2).
     assert!(
         out.contains(r#""path":null"#),
         "path should be null:\n{out}"
@@ -119,8 +128,11 @@ fn user_template_params_are_injected() {
     // `--param k=v` flows into window.__TINYVIEW__.params for user templates.
     let home = home_with_template("themed", &template_with_marker());
 
+    // Input over stdin (#1 everywhere) keeps this cross-platform; the assertion
+    // here is on the injected param, not the input value. See `dump_cmd`.
     let assert = dump_cmd(home.path())
-        .args(["--html", "x", "-t", "themed", "--param", "theme=solarized"])
+        .args(["-t", "themed", "--param", "theme=solarized"])
+        .write_stdin("x")
         .assert()
         .success();
 
@@ -138,8 +150,13 @@ fn user_template_without_marker_passes_through_with_warning() {
     let body = "<!doctype html>\n<html><body>no marker here</body></html>";
     let home = home_with_template("nomarker", body);
 
+    // Input value is irrelevant here: a marker-less template passes through
+    // byte-for-byte whatever the input. Close stdin and supply `--html`. (On
+    // non-unix `stdin_has_data()` is `true`, so the empty stdin is read as the
+    // input, but that has no bearing on the pass-through output we assert.)
     let assert = dump_cmd(home.path())
         .args(["--html", "ignored", "-t", "nomarker"])
+        .write_stdin("")
         .assert()
         .success();
 
@@ -165,8 +182,11 @@ fn missing_user_template_fails_cleanly() {
     let home = tempfile::tempdir().expect("temp HOME");
     fs::create_dir_all(home.path().join(".tinyview").join("templates")).expect("mkdir");
 
+    // Input value is irrelevant: resolution of a non-existent template file
+    // fails before any input is injected. Close stdin and supply `--html`.
     let assert = dump_cmd(home.path())
         .args(["--html", "x", "-t", "does-not-exist"])
+        .write_stdin("")
         .assert()
         .failure();
 
