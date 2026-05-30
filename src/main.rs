@@ -145,12 +145,15 @@ fn is_raw_fast_path(cli: &Cli, input: &Input) -> bool {
     cli.template.is_none() && cli.param.is_empty() && input.path.is_none()
 }
 
-/// Resolve `User(<name>.html)` to an absolute path under `~/.tinyview/templates/`.
+/// Resolve `User(<name>.html)` to an absolute path under the config root's
+/// `templates/` dir. Shares the same fallback chain as `config.toml`
+/// (`$XDG_CONFIG_HOME` > `~/.config/tinyview` > `~/.tinyview`) via
+/// [`config::config_root`] (PRD §11.1).
 fn resolve_user_template_path(tpl: TemplateRef) -> TemplateRef {
     match tpl {
         TemplateRef::User(rel) if rel.is_relative() => {
-            let root = std::env::var_os("HOME")
-                .map(|h| PathBuf::from(h).join(".tinyview/templates"))
+            let root = config::config_root()
+                .map(|r| r.join("templates"))
                 .unwrap_or_else(|| PathBuf::from("."));
             TemplateRef::User(root.join(rel))
         }

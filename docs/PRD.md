@@ -455,17 +455,16 @@ WebView inject
 
 ## 11.1 Config Root
 
-```text
-~/.tinyview/
-```
-
-将来的には：
+Config root は以下の優先順位で解決する（**存在する最初の** ディレクトリを採用）:
 
 ```text
-$XDG_CONFIG_HOME/tinyview/
+1. $XDG_CONFIG_HOME/tinyview/   (XDG_CONFIG_HOME が設定されている場合)
+2. $HOME/.config/tinyview/      (XDG デフォルト, 主に Linux)
+3. $HOME/.tinyview/             (旧来のデフォルト / 後方互換)
 ```
 
-対応を検討する。
+どの候補も存在しない場合は、後方互換のため `~/.tinyview/` を最終 fallback とする。
+`config.toml` と `templates/` は同じ root を共有する。
 
 ---
 
