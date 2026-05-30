@@ -14,6 +14,11 @@ mod config;
 mod detach;
 #[cfg(feature = "e2e")]
 mod e2e;
+mod menu;
+// Menu layout data + tests. macOS-only: the only consumer is the macOS menu
+// builder (`menu::install`); other platforms keep their menu-less behavior.
+#[cfg(target_os = "macos")]
+mod shortcuts;
 mod template;
 mod watch;
 mod webview;
@@ -252,6 +257,14 @@ fn launch_webview(
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
         event_loop.set_activation_policy(ActivationPolicy::Regular);
     }
+
+    // Install the native menu bar so standard shortcuts work (Cmd+Q quit,
+    // Ctrl+Cmd+F fullscreen, Cmd+W close, Cmd+M minimize, Cmd+C/V/X/A edit).
+    // The NSApp now exists (created by `EventLoopBuilder::build`), which
+    // `init_for_nsapp` requires. We hold the guard for the lifetime of the
+    // event loop — on macOS `run` diverges (`-> !`), so this local lives for
+    // the whole process. No-op on non-macOS (see src/menu.rs).
+    let _menu_guard = menu::install();
 
     // Transparency is a *two-layer* contract:
     //   1. tao's NSWindow / HWND must be transparent so the OS compositor
