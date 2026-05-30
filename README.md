@@ -264,6 +264,13 @@ time except in `raw` mode (raw assumes trusted input — `--allow-*` flags re-en
 | `--allow-clipboard` | Enable wry clipboard. **macOS caveat:** WKWebView exposes Cmd+C/V at the OS level and cannot be fully disabled. |
 | `--allow-storage`   | Disable incognito; persist DataStore between runs.                                          |
 
+> **Opaque-origin caveat (clipboard / storage).** TinyView injects HTML in-memory via
+> `with_html` with no base URL, so the document runs in an **opaque origin**. The Clipboard
+> API (`navigator.clipboard`) is secure-context-gated and `localStorage` throws
+> `SecurityError` in an opaque origin — so on the in-memory path these are **not reachable
+> from page JS even with the flags set**. `--allow-fetch` is unaffected because it is enforced
+> purely through the CSP `<meta>`. This is verified by the E2E self-test (see *Contributing*).
+
 ---
 
 ## Architecture
@@ -302,6 +309,27 @@ Read [`docs/PRD.md`](docs/PRD.md) first — it is the source of truth for what T
 not. Proposals that add a server, a port, a temp preview file, or that hurt the <150 ms startup
 target are out of scope by definition. Template / plugin / optional-feature paths are the right
 home for anything beyond the core runtime.
+
+### Tests
+
+```bash
+cargo test                  # unit tests (CSP construction, injection, CLI parsing)
+```
+
+The `--allow-*` flags are additionally covered by a **live-WebView E2E self-test** that drives a
+real WebView through the production build path and reads page-side JS behavior back over a
+feature-gated IPC channel (`src/e2e.rs`). The bridge it needs is compiled **only** under the `e2e`
+feature, so the production binary never carries a JS→native bridge.
+
+```bash
+# macOS (authoritative):
+TINYVIEW_E2E_SELFTEST=1 cargo run --features e2e
+# Linux (needs a display — wrap in xvfb):
+xvfb-run -a env TINYVIEW_E2E_SELFTEST=1 cargo run --features e2e
+```
+
+It exits non-zero on a hard failure. CI runs it best-effort on macOS + Linux (the `e2e` job);
+headless GUI execution is environment-dependent, so local macOS is the source of truth.
 
 ---
 

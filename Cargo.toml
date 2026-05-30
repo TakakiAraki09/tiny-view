@@ -10,6 +10,14 @@ license = "MIT"
 name = "tinyview"
 path = "src/main.rs"
 
+[features]
+# `e2e`: compiles the live-WebView self-test harness (src/e2e.rs) and the
+# JS→native IPC bridge it needs to read back in-page JS behavior. NEVER enabled
+# in production builds — keeping it behind a feature guarantees the bridge that
+# violates the "no native bridge" security default (CLAUDE.md) is not present in
+# the shipped binary. Run with: TINYVIEW_E2E_SELFTEST=1 cargo run --features e2e
+e2e = []
+
 [dependencies]
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 # `transparent` feature enables true per-pixel transparency on macOS by calling
