@@ -267,6 +267,35 @@ jobs:
             echo "::warning::tinyview release binary exceeds PRD §3 budget (10 MB): ${SIZE_MB} MB"
           fi
 
+      # macOS: package the release binary as TinyView.app (issue #11). The .app
+      # is a SECOND, parallel artifact — the bare `tinyview` CLI binary above is
+      # unchanged. scripts/bundle-macos.sh wraps the same binary (no rebuild) so
+      # the bundle adds zero runtime cost. Uploaded as a build artifact so the
+      # double-clickable bundle is downloadable from the run.
+      - name: Bundle macOS .app
+        if: matrix.os == 'macos-latest'
+        run: scripts/bundle-macos.sh --no-build --binary target/release/tinyview
+
+      - name: Verify .app bundle (plist lint + structure)
+        if: matrix.os == 'macos-latest'
+        run: |
+          set -euo pipefail
+          APP="target/release/TinyView.app"
+          plutil -lint "$APP/Contents/Info.plist"
+          test -x "$APP/Contents/MacOS/tinyview"        # embedded CLI binary
+          test -x "$APP/Contents/MacOS/tinyview-app"    # CFBundleExecutable launcher
+          test -f "$APP/Contents/Resources/welcome.html"
+          # LSUIElement must be true (issue #11: accessory app).
+          test "$(plutil -extract LSUIElement raw "$APP/Contents/Info.plist")" = "true"
+
+      - name: Upload TinyView.app artifact
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TinyView-app-macos
+          path: target/release/TinyView.app
+          if-no-files-found: error
+
   # Raw-path startup performance guard (issue #8 / PRD §16).
   #
   # PRD §16 targets for `echo '<h1>x</h1>' | tinyview`: startup <150ms.

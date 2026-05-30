@@ -90,6 +90,38 @@ ln -s "$PWD/target/release/tinyview" /usr/local/bin/tinyview
 Requires Rust 1.75+. On Linux you also need WebKitGTK development headers
 (`libwebkit2gtk-4.1-dev` on Debian/Ubuntu).
 
+### macOS: TinyView.app bundle (optional)
+
+The CLI above is the primary artifact. On macOS you can additionally package the
+**same** release binary as a double-clickable `TinyView.app`:
+
+```bash
+cargo build --release
+scripts/bundle-macos.sh          # → target/release/TinyView.app
+open target/release/TinyView.app # double-click equivalent: opens a welcome WebView
+```
+
+The bundle is a *second, parallel* artifact — it does not replace or wrap the
+`tinyview` CLI, which is still invoked exactly as documented below. The binary
+embedded in `Contents/MacOS/tinyview` is byte-identical to the CLI build, so the
+bundle adds nothing to startup time or binary size.
+
+What the bundle adds is macOS bundle identity: a `CFBundleIdentifier`, an app
+name in the menu bar / Cmd-Tab, `Info.plist` metadata, and (if you drop one at
+`assets/AppIcon.icns`) an app icon. It declares `LSUIElement = true`, so the
+bundle's resting identity is an *accessory* app; at runtime TinyView promotes
+itself to a regular activation policy (`src/main.rs`) so the WebView window
+still shows a Dock icon, takes focus, and joins Cmd-Tab.
+
+Because a `.app` launched from Finder gets no stdin/file/`--html`, its
+`CFBundleExecutable` is a tiny launcher (`Contents/MacOS/tinyview-app`) that
+pipes a bundled welcome page (`Contents/Resources/welcome.html`) into the binary
+in `--foreground` mode. No temp file and no server are involved — the welcome
+HTML is fed in-memory over stdin, same as `echo … | tinyview`.
+
+CI builds and uploads `TinyView.app` as the `TinyView-app-macos` artifact on the
+`macos-latest` runner (see `.github/workflows/ci.yml`).
+
 ---
 
 ## Usage
@@ -341,9 +373,11 @@ to `NSApplicationActivationPolicyRegular` and activates the app on launch, so th
 TinyView additionally sets `ActivationPolicy::Regular` explicitly on the child's event loop so this
 behavior is pinned to TinyView rather than left to a framework default.
 
-Known gap: without a bundle, the app name shown in the menu bar / Cmd-Tab is the raw binary name
-(`tinyview`) and there is no custom app icon. Packaging as a proper `.app` for full system
-integration is tracked in [#11](https://github.com/TakakiAraki09/tiny-view/issues/11).
+When run as the bare CLI binary, the app name shown in the menu bar / Cmd-Tab is the raw binary
+name (`tinyview`) and there is no custom app icon. For full system integration, package the binary
+as a `TinyView.app` bundle (`LSUIElement = true` accessory app) via `scripts/bundle-macos.sh` — see
+[*Install → macOS: TinyView.app bundle*](#macos-tinyviewapp-bundle-optional). The bundle is a
+separate artifact; the CLI is unchanged.
 
 Full design and rationale: [`docs/PRD.md`](docs/PRD.md).
 
@@ -361,6 +395,7 @@ MVP is complete:
 - CSP injection, incognito-by-default, navigation handler, `--allow-*` flags
 - `--frameless` and `--transparent` window flags
 - `$XDG_CONFIG_HOME` / `~/.config/tinyview` config root with legacy `~/.tinyview` fallback
+- macOS `TinyView.app` bundle packaging (`scripts/bundle-macos.sh`, accessory app)
 
 Distributed on crates.io (`cargo install tinyview`). Not yet implemented / out of MVP scope:
 Windows runtime verification, pre-built signed release binaries, Homebrew distribution.
