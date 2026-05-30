@@ -735,6 +735,20 @@ tinyview app.html --allow-storage
 | `--allow-clipboard` | wry `with_clipboard(true)`（macOS では既にOS側で許可されており差分なし）                       |
 | `--allow-storage`   | wry `with_incognito(false)` + `WebContext` を永続パスで構成。プロセス終了後も DataStore が残る |
 
+### 19.2.1 `<meta>` による fetch 許可
+
+`--allow-fetch` を毎回 CLI で指定する手間を省くため、template / 入力 HTML 側の `<head>` に以下を置くことでも同等に許可できる:
+
+```html
+<meta name="tinyview-allow" content="fetch">
+```
+
+- `content` はスペース区切りのトークンリスト。現状認識するのは `fetch` のみ（例 `content="fetch"`）。
+- CLI フラグ `--allow-fetch` とは **OR 関係**。どちらか一方でも許可されれば `connect-src` が緩和される。
+- **信頼モデル**: TinyView は利用者自身が pipe / 指定した HTML のみを描画するため、自己宣言の `<meta>` は利用者の意図表明とみなす（§19 の信頼境界）。リモートコンテンツを開かない前提なので、HTML が自分自身に fetch 権限を宣言できても境界は破られない。
+- `fetch` 以外（clipboard / storage）は §19.4 / opaque-origin 制約により meta では許可せず、CLI フラグのみ。
+- これは §19.4 が禁じる `<meta http-equiv="Content-Security-Policy">`（CSP 直書き）とは **別物**。`name="tinyview-allow"` は CSP を直接書くのではなく runtime に許可を宣言するだけで、最終的な CSP `<meta http-equiv>` は runtime が排他的に生成する。
+
 ## 19.3 Ephemeral 実装上の必須要件
 
 PRD §6.4「閉じたら全破棄」を実装で守るため、以下を **runtime のデフォルト** として組み込む。`--allow-*` 指定で対応スライスのみ緩和される。
@@ -757,7 +771,7 @@ CSP は runtime が排他的に管理する。**Template HTML 側に `<meta http
 
 ## 19.5 raw mode と Security
 
-`raw` mode (§13.1) でも §19.3 の WebView builder デフォルト (incognito / devtools / clipboard / navigation_handler) は適用される。ただし CSP `<meta>` 注入は起動最速優先のため **skip する** — raw mode の利用者は信頼できる入力を流す責務を負う。`--allow-*` フラグが指定された場合のみ CSP 注入が走る。
+`raw` mode (§13.1) でも §19.3 の WebView builder デフォルト (incognito / devtools / clipboard / navigation_handler) は適用される。ただし CSP `<meta>` 注入は起動最速優先のため **skip する** — raw mode の利用者は信頼できる入力を流す責務を負う。`--allow-*` フラグ、または `<meta name="tinyview-allow">` による許可 (§19.2.1) が存在する場合のみ CSP 注入が走る（許可されたスライスを反映した CSP を当てる必要があるため）。
 
 ---
 

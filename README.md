@@ -350,6 +350,11 @@ time except in `raw` mode (raw assumes trusted input — `--allow-*` flags re-en
 > from page JS even with the flags set**. `--allow-fetch` is unaffected because it is enforced
 > purely through the CSP `<meta>`. This is verified by the E2E self-test (see *Contributing*).
 
+> **Grant fetch without the flag.** A template or input document can opt into outbound fetch by
+> putting `<meta name="tinyview-allow" content="fetch">` in its `<head>` — equivalent to
+> `--allow-fetch` and OR'd with it (whichever grants it wins). `content` is a space-separated token
+> list; only `fetch` is recognized today. Clipboard/storage stay CLI-only. See PRD §19.2.1.
+
 ---
 
 ## Architecture

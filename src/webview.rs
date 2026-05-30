@@ -82,6 +82,81 @@ pub fn build_csp(perms: &Permissions) -> String {
     )
 }
 
+/// Extract the value of `attr` from a (lowercased) tag fragment.
+///
+/// Handles both single- and double-quoted values (e.g. `content="fetch"` and
+/// `content='fetch'`). Returns the first match. Intentionally simple — we avoid
+/// pulling in `regex`/an HTML parser for startup-time reasons (CLAUDE.md KPI #1).
+fn extract_attr(tag: &str, attr: &str) -> Option<String> {
+    let key = format!("{attr}=");
+    let mut from = 0;
+    while let Some(rel) = tag[from..].find(&key) {
+        let vstart = from + rel + key.len();
+        let bytes = tag.as_bytes();
+        if vstart >= bytes.len() {
+            return None;
+        }
+        let quote = bytes[vstart];
+        if quote == b'"' || quote == b'\'' {
+            let rest = &tag[vstart + 1..];
+            if let Some(end) = rest.find(quote as char) {
+                return Some(rest[..end].to_string());
+            }
+        }
+        // Not a quoted value we understand; keep scanning for another `attr=`.
+        from = vstart;
+    }
+    None
+}
+
+/// Scan the HTML for a `<meta name="tinyview-allow" content="...">` tag and
+/// return true when the space-separated `content` token list includes `fetch`.
+///
+/// This lets a template/document opt into outbound fetch (XHR / WebSocket)
+/// without the CLI `--allow-fetch` flag; the two are OR'd (see [`effective_perms`]).
+/// The trust model is that TinyView only renders content the user themselves
+/// pipes in, so a self-declared `<meta>` is an expression of the user's intent
+/// (PRD §19). Only `fetch` is meta-grantable today; clipboard/storage remain
+/// CLI-only.
+///
+/// Like the rest of this module we use a deliberately simple string scan rather
+/// than a real HTML parser (CLAUDE.md KPI #1: startup time).
+fn meta_allows_fetch(html: &str) -> bool {
+    let lower = html.to_ascii_lowercase();
+    let mut search_from = 0;
+    while let Some(rel) = lower[search_from..].find("<meta") {
+        let tag_start = search_from + rel;
+        let tag_end = match lower[tag_start..].find('>') {
+            Some(e) => tag_start + e,
+            None => break,
+        };
+        let tag = &lower[tag_start..tag_end];
+        let is_allow_tag = tag.contains("name=\"tinyview-allow\"")
+            || tag.contains("name='tinyview-allow'");
+        if is_allow_tag {
+            if let Some(content) = extract_attr(tag, "content") {
+                if content.split_whitespace().any(|t| t == "fetch") {
+                    return true;
+                }
+            }
+        }
+        search_from = tag_end + 1;
+    }
+    false
+}
+
+/// Combine CLI-granted permissions with permissions declared inline in the HTML
+/// via `<meta name="tinyview-allow" ...>`. Currently only `fetch` is
+/// meta-grantable, and it is OR'd with the `--allow-fetch` flag (whichever
+/// grants it wins). Clipboard/storage are unaffected (CLI-only).
+fn effective_perms(html: &str, perms: &Permissions) -> Permissions {
+    let mut eff = *perms;
+    if !eff.allow_fetch && meta_allows_fetch(html) {
+        eff.allow_fetch = true;
+    }
+    eff
+}
+
 /// Find the start of the `<head ...>` opening tag (case-insensitive)
 /// and return the byte offset *just after* the closing `>` of that tag.
 fn find_head_open_end(html: &str) -> Option<usize> {
@@ -140,12 +215,14 @@ catch (e) { try { navigator.clipboard = undefined; } catch (_) {} }";
 /// has the same CSP `<meta>` injected as the initial render.
 ///
 /// Mirrors the `inject_csp_now` rule in [`build`]: CSP is injected unless
-/// `raw_mode` is set AND no permission flag has been granted.
+/// `raw_mode` is set AND no permission has been granted (by flag *or* by an
+/// inline `<meta name="tinyview-allow">` — see [`effective_perms`]).
 pub fn prepare_html(html: &str, perms: &Permissions, raw_mode: bool) -> String {
+    let perms = effective_perms(html, perms);
     let any_perm = perms.allow_fetch || perms.allow_clipboard || perms.allow_storage;
     let inject = !raw_mode || any_perm;
     if inject {
-        inject_csp(html, perms)
+        inject_csp(html, &perms)
     } else {
         html.to_string()
     }
@@ -164,12 +241,15 @@ pub fn prepare_html(html: &str, perms: &Permissions, raw_mode: bool) -> String {
 /// CSP `<meta>` is injected into HTML unless `opts.raw_mode` is set AND
 /// no permission flag has been granted (PRD §19.5).
 pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
-    let any_perm = opts.perms.allow_fetch || opts.perms.allow_clipboard || opts.perms.allow_storage;
+    // Fold any inline `<meta name="tinyview-allow">` grant into the CLI perms
+    // before deciding CSP/injection (PRD §19; OR semantics).
+    let perms = effective_perms(opts.html, &opts.perms);
+    let any_perm = perms.allow_fetch || perms.allow_clipboard || perms.allow_storage;
     let inject_csp_now = !opts.raw_mode || any_perm;
 
     // Avoid an allocation when we won't inject CSP.
     let html_owned: Option<String> = if inject_csp_now {
-        Some(inject_csp(opts.html, &opts.perms))
+        Some(inject_csp(opts.html, &perms))
     } else {
         None
     };
@@ -177,8 +257,8 @@ pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
 
     let mut builder = WebViewBuilder::new()
         .with_html(html_to_load)
-        .with_incognito(!opts.perms.allow_storage)
-        .with_clipboard(opts.perms.allow_clipboard)
+        .with_incognito(!perms.allow_storage)
+        .with_clipboard(perms.allow_clipboard)
         .with_transparent(opts.transparent)
         .with_navigation_handler(|url: String| {
             // Top-level navigation policy: only `about:` and `data:` are allowed.
@@ -208,7 +288,7 @@ pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
     // macOS clipboard reinforcement (PRD §19.3).
     #[cfg(target_os = "macos")]
     {
-        if !opts.perms.allow_clipboard {
+        if !perms.allow_clipboard {
             builder = builder.with_initialization_script(MACOS_CLIPBOARD_NEUTRALIZE);
         }
     }
@@ -349,5 +429,102 @@ mod tests {
             },
         );
         assert!(out.contains("connect-src https: http: ws: wss:"));
+    }
+
+    #[test]
+    fn meta_allows_fetch_detects_double_quoted() {
+        let html = r#"<head><meta name="tinyview-allow" content="fetch"></head>"#;
+        assert!(meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn meta_allows_fetch_detects_single_quoted() {
+        let html = r#"<head><meta name='tinyview-allow' content='fetch'></head>"#;
+        assert!(meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn meta_allows_fetch_is_case_insensitive() {
+        let html = r#"<HEAD><META NAME="tinyview-allow" CONTENT="fetch"></HEAD>"#;
+        assert!(meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn meta_allows_fetch_detects_token_among_others() {
+        // `content` is a space-separated token list; `fetch` need not be alone.
+        let html = r#"<meta name="tinyview-allow" content="clipboard fetch storage">"#;
+        assert!(meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn meta_allows_fetch_ignores_other_names() {
+        let html = r#"<meta name="description" content="fetch">"#;
+        assert!(!meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn meta_allows_fetch_ignores_substring_tokens() {
+        // `prefetch` / `fetchall` must not be mistaken for the `fetch` token.
+        let html = r#"<meta name="tinyview-allow" content="prefetch fetchall">"#;
+        assert!(!meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn meta_allows_fetch_false_when_absent() {
+        let html = "<head><title>x</title></head><body>no meta here</body>";
+        assert!(!meta_allows_fetch(html));
+    }
+
+    #[test]
+    fn effective_perms_ors_meta_with_flag() {
+        let html = r#"<meta name="tinyview-allow" content="fetch">"#;
+        // CLI flag off, meta on -> fetch granted.
+        let eff = effective_perms(html, &Permissions::default());
+        assert!(eff.allow_fetch);
+
+        // CLI flag on, no meta -> still granted (OR).
+        let eff = effective_perms(
+            "<head></head>",
+            &Permissions {
+                allow_fetch: true,
+                ..Default::default()
+            },
+        );
+        assert!(eff.allow_fetch);
+    }
+
+    #[test]
+    fn effective_perms_does_not_touch_clipboard_or_storage() {
+        let html = r#"<meta name="tinyview-allow" content="fetch clipboard storage">"#;
+        // Only `fetch` is meta-grantable; clipboard/storage stay CLI-only.
+        let eff = effective_perms(html, &Permissions::default());
+        assert!(eff.allow_fetch);
+        assert!(!eff.allow_clipboard);
+        assert!(!eff.allow_storage);
+    }
+
+    #[test]
+    fn prepare_html_meta_opens_connect_src() {
+        let html = r#"<head><meta name="tinyview-allow" content="fetch"></head>"#;
+        let out = prepare_html(html, &Permissions::default(), false);
+        assert!(out.contains("connect-src https: http: ws: wss:"));
+        assert!(!out.contains("connect-src 'none'"));
+    }
+
+    #[test]
+    fn prepare_html_meta_forces_injection_in_raw_mode() {
+        // raw_mode normally skips CSP injection, but a meta grant forces it so
+        // the connect-src relaxation actually takes effect.
+        let html = r#"<head><meta name="tinyview-allow" content="fetch"></head>"#;
+        let out = prepare_html(html, &Permissions::default(), true);
+        assert!(out.contains("<meta http-equiv=\"Content-Security-Policy\""));
+        assert!(out.contains("connect-src https: http: ws: wss:"));
+    }
+
+    #[test]
+    fn prepare_html_raw_mode_without_grant_skips_injection() {
+        let html = "<head></head>";
+        let out = prepare_html(html, &Permissions::default(), true);
+        assert!(!out.contains("Content-Security-Policy"));
     }
 }
