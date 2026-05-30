@@ -390,6 +390,23 @@ fn run(cli: Cli) -> ExitCode {
         }
     };
 
+    // Test-only HTML dump hook (issue #7). When `TINYVIEW_DUMP_HTML` is set,
+    // print the fully composed HTML (template resolve → file read → inject) to
+    // stdout and exit *before* launching or detaching a WebView. This lets the
+    // integration tests assert the real `~/.tinyview/templates/<name>.html`
+    // path-based flow without a GUI/display, which is impossible in CI (the CLI
+    // detaches and the WebView render can't be observed headlessly).
+    //
+    // This honors every absolute condition: it writes to stdout (no server / no
+    // port / no generated preview file) and holds no persistent state. It sits
+    // off the raw fast path (raw_mode returns input verbatim above, and the env
+    // var is only consulted here on the already-slow template path), so it does
+    // not regress the <150ms startup KPI for `echo '<h1>x</h1>' | tinyview`.
+    if std::env::var_os("TINYVIEW_DUMP_HTML").is_some() {
+        print!("{html}");
+        return ExitCode::SUCCESS;
+    }
+
     let width = cli
         .width
         .or(cfg.and_then(|c| c.window_width))
