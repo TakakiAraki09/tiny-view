@@ -5,13 +5,15 @@
 //! Ctrl+Cmd+F (fullscreen), Cmd+W (close), Cmd+M (minimize), Cmd+C/V/X/A
 //! (edit) — do nothing: there is no menu to own those accelerators.
 //!
-//! We install a minimal standard menu built entirely from `muda`'s
-//! *predefined* items. Each predefined item maps to an AppKit standard
-//! selector (`terminate:`, `toggleFullScreen:`, `performClose:`, `copy:` …),
-//! so AppKit dispatches them through the NSMenu / responder chain. That is why
-//! this works even while the WKWebView holds first-responder focus —
-//! intercepting key events directly in the tao event loop would not, because
-//! the WebView swallows the keystroke before tao sees it.
+//! This module is a thin builder: it walks [`crate::shortcuts::MENU_LAYOUT`]
+//! (the platform-independent, unit-tested source of truth for the menu's
+//! contents) and maps each [`MenuItem`] to a `muda` *predefined* item. Each
+//! predefined item maps to an AppKit standard selector (`terminate:`,
+//! `toggleFullScreen:`, `performClose:`, `copy:` …), so AppKit dispatches them
+//! through the NSMenu / responder chain. That is why this works even while the
+//! WKWebView holds first-responder focus — intercepting key events directly in
+//! the tao event loop would not, because the WebView swallows the keystroke
+//! before tao sees it.
 //!
 //! Because every item is a predefined AppKit action, TinyView neither listens
 //! for `muda::MenuEvent` nor installs any JS↔native bridge: the security model
@@ -34,56 +36,19 @@
 /// On non-macOS this is a no-op returning a zero-sized guard.
 #[cfg(target_os = "macos")]
 pub fn install() -> muda::Menu {
-    use muda::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+    use crate::shortcuts::MENU_LAYOUT;
+    use muda::{Menu, Submenu};
 
     let menu = Menu::new();
-
-    // On macOS the first submenu becomes the application menu; its title is
-    // replaced by the app name (from the `.app` bundle / process name).
-    let app = Submenu::new("TinyView", true);
-    let _ = app.append_items(&[
-        &PredefinedMenuItem::about(
-            None,
-            Some(AboutMetadata {
-                name: Some("TinyView".to_owned()),
-                version: Some(env!("CARGO_PKG_VERSION").to_owned()),
-                ..Default::default()
-            }),
-        ),
-        &PredefinedMenuItem::separator(),
-        &PredefinedMenuItem::hide(None),
-        &PredefinedMenuItem::hide_others(None),
-        &PredefinedMenuItem::show_all(None),
-        &PredefinedMenuItem::separator(),
-        &PredefinedMenuItem::quit(None),
-    ]);
-
-    // Edit: native Cmd+C/V/X/A. PRD §19.3 documents that WKWebView clipboard
-    // shortcuts are always available at the OS level — these menu items just
-    // surface the standard accelerators; they add no new capability.
-    let edit = Submenu::new("Edit", true);
-    let _ = edit.append_items(&[
-        &PredefinedMenuItem::cut(None),
-        &PredefinedMenuItem::copy(None),
-        &PredefinedMenuItem::paste(None),
-        &PredefinedMenuItem::select_all(None),
-    ]);
-
-    // View: Enter Full Screen (Ctrl+Cmd+F via AppKit's toggleFullScreen:).
-    let view = Submenu::new("View", true);
-    let _ = view.append_items(&[&PredefinedMenuItem::fullscreen(None)]);
-
-    // Window: Minimize (Cmd+M) and Close (Cmd+W). For TinyView's single
-    // ephemeral window, Close behaves like Quit — closing tears down the
-    // WebView and ends the process.
-    let window = Submenu::new("Window", true);
-    let _ = window.append_items(&[
-        &PredefinedMenuItem::minimize(None),
-        &PredefinedMenuItem::separator(),
-        &PredefinedMenuItem::close_window(None),
-    ]);
-
-    let _ = menu.append_items(&[&app, &edit, &view, &window]);
+    for section in MENU_LAYOUT {
+        let submenu = Submenu::new(section.title, true);
+        for &item in section.items {
+            // `append` only errors on duplicate-item insertion, which cannot
+            // happen here: every call builds a fresh predefined item.
+            let _ = submenu.append(&predefined(item));
+        }
+        let _ = menu.append(&submenu);
+    }
 
     // Requires the NSApp to already exist — only call after the tao event loop
     // has been built. Must run on the main thread (it does: tao event loops are
@@ -91,6 +56,38 @@ pub fn install() -> muda::Menu {
     menu.init_for_nsapp();
 
     menu
+}
+
+/// Map a layout [`MenuItem`] to its `muda` predefined item. The accelerators
+/// are AppKit's macOS defaults (asserted against [`crate::shortcuts`]); we do
+/// not pass our own.
+#[cfg(target_os = "macos")]
+fn predefined(item: crate::shortcuts::MenuItem) -> muda::PredefinedMenuItem {
+    use crate::shortcuts::MenuItem;
+    use muda::{AboutMetadata, PredefinedMenuItem};
+
+    match item {
+        MenuItem::About => PredefinedMenuItem::about(
+            None,
+            Some(AboutMetadata {
+                name: Some("TinyView".to_owned()),
+                version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                ..Default::default()
+            }),
+        ),
+        MenuItem::Hide => PredefinedMenuItem::hide(None),
+        MenuItem::HideOthers => PredefinedMenuItem::hide_others(None),
+        MenuItem::ShowAll => PredefinedMenuItem::show_all(None),
+        MenuItem::Quit => PredefinedMenuItem::quit(None),
+        MenuItem::Cut => PredefinedMenuItem::cut(None),
+        MenuItem::Copy => PredefinedMenuItem::copy(None),
+        MenuItem::Paste => PredefinedMenuItem::paste(None),
+        MenuItem::SelectAll => PredefinedMenuItem::select_all(None),
+        MenuItem::Fullscreen => PredefinedMenuItem::fullscreen(None),
+        MenuItem::Minimize => PredefinedMenuItem::minimize(None),
+        MenuItem::CloseWindow => PredefinedMenuItem::close_window(None),
+        MenuItem::Separator => PredefinedMenuItem::separator(),
+    }
 }
 
 /// Zero-sized guard returned by the non-macOS [`install`] stub. Exists so the

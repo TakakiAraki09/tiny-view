@@ -15,6 +15,10 @@ mod detach;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod menu;
+// Menu layout data + tests. macOS-only: the only consumer is the macOS menu
+// builder (`menu::install`); other platforms keep their menu-less behavior.
+#[cfg(target_os = "macos")]
+mod shortcuts;
 mod template;
 mod watch;
 mod webview;
