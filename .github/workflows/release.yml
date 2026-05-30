@@ -1,19 +1,33 @@
 name: Release
 
-# Publish to crates.io on a version tag push (e.g. `git tag v0.1.0 && git push --tags`).
-# A published crate version is immutable (yank hides it but never frees the
-# number), so this workflow is deliberately the ONLY automated publish path and
-# guards the tag against Cargo.toml before the irreversible upload.
+# Manual, one-click publish to crates.io. Trigger from the Actions tab (or
+# `gh workflow run Release -f version=X.Y.Z`) and the workflow bumps the version,
+# syncs the lockfile, publishes, and only then records the release commit + tag.
+#
+# Why dispatch instead of tag-push: a tag-push flow forces you to bump
+# Cargo.toml / Cargo.lock and tag in lockstep by hand. Any drift (notably a
+# stale Cargo.lock) makes `cargo publish` rewrite the lockfile on the runner,
+# dirty the tree, and abort — after which the tag already points at the wrong
+# commit and has to be force-moved. Doing the bump + lock sync + publish + tag
+# inside one job removes that whole class of failure.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.5 (no leading v)"
+        required: true
+        type: string
 
-# Never run two publishes for the same tag concurrently; do NOT cancel an
-# in-flight publish — an interrupted upload could leave a half-published version.
+# Never run two publishes concurrently; do NOT cancel an in-flight publish — an
+# interrupted upload could leave a half-published version.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
+
+# The job commits the bump and pushes the release tag back to the repo, so it
+# needs write access to repository contents.
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,8 +37,8 @@ jobs:
   publish:
     name: publish to crates.io
     runs-on: ubuntu-latest
-    # Only the canonical repo publishes — a fork pushing a tag must not attempt
-    # an upload (it would fail on a missing token, but fail fast and explicitly).
+    # Only the canonical repo publishes — a fork dispatching this must not
+    # attempt an upload (it would fail on a missing token, but fail fast).
     if: github.repository == 'TakakiAraki09/tiny-view'
     steps:
       - name: Checkout
@@ -55,21 +69,78 @@ jobs:
             pkg-config \
             build-essential
 
-      # Guard: the pushed tag (vX.Y.Z) must equal Cargo.toml's `version`.
-      # crates.io rejects a re-published version and the number can never be
-      # reused, so catch a mismatch BEFORE the irreversible upload.
-      - name: Verify tag matches Cargo.toml version
+      # Reject malformed input before doing anything irreversible. Accept
+      # X.Y.Z with an optional `-prerelease` suffix (e.g. 1.0.5, 2.0.0-rc.1).
+      - name: Validate version input
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME#v}"
-          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          echo "tag=${TAG} cargo=${CARGO_VERSION}"
-          if [ "${TAG}" != "${CARGO_VERSION}" ]; then
-            echo "::error::pushed tag v${TAG} does not match Cargo.toml version ${CARGO_VERSION}"
+          VERSION="${{ inputs.version }}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::version '${VERSION}' is not a valid semver (expected X.Y.Z[-prerelease])"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      # Guards against the two irreversible collisions, BEFORE the upload:
+      # a crates.io version can never be re-published, and a moved release tag
+      # is the exact footgun this workflow exists to avoid.
+      - name: Guard against existing tag / published version
+        run: |
+          set -euo pipefail
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
+            echo "::error::tag v${VERSION} already exists — pick an unused version"
+            exit 1
+          fi
+          # crates.io returns 200 for an existing version, 404 otherwise.
+          CODE=$(curl -fsS -o /dev/null -w '%{http_code}' \
+            "https://crates.io/api/v1/crates/tinyview/${VERSION}" || true)
+          if [ "$CODE" = "200" ]; then
+            echo "::error::tinyview ${VERSION} is already published on crates.io"
             exit 1
           fi
 
+      # Set the package version to the requested value. `0,/.../` limits the
+      # substitution to the FIRST `version = "..."` line — that is the
+      # [package] version near the top of Cargo.toml; dependency versions use
+      # the inline `{ version = ... }` form and never start a line.
+      - name: Bump Cargo.toml version
+        run: |
+          set -euo pipefail
+          sed -i -E "0,/^version = \".*\"/s//version = \"${VERSION}\"/" Cargo.toml
+          # Sync Cargo.lock so the committed lockfile matches the new version —
+          # this is precisely the drift that broke the previous tag-push flow.
+          cargo update -p tinyview --precise "${VERSION}"
+
+      # Belt-and-suspenders: confirm the manifest now actually carries the
+      # requested version before the irreversible upload.
+      - name: Verify bumped version
+        run: |
+          set -euo pipefail
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          echo "input=${VERSION} cargo=${CARGO_VERSION}"
+          if [ "${VERSION}" != "${CARGO_VERSION}" ]; then
+            echo "::error::bump failed: Cargo.toml is ${CARGO_VERSION}, expected ${VERSION}"
+            exit 1
+          fi
+
+      # The irreversible step. `--locked` makes a lockfile mismatch a hard
+      # error here instead of a silent rewrite-and-dirty later. Run it BEFORE
+      # touching git so a failed publish leaves `main` clean — no orphan
+      # release commit or tag for a version that never shipped.
       - name: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        run: cargo publish --locked
+
+      # Publish succeeded → record the release. Commit the bump and tag the
+      # exact commit that produced the published crate.
+      - name: Commit bump and push release tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release v${VERSION}"
+          git push origin HEAD:main
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
