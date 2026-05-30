@@ -226,7 +226,32 @@ fn launch_webview(
     // Always use `EventLoop<UserEvent>` — even when watch is off — so the
     // event-loop closure type is uniform and we avoid duplicating the run
     // body for two different event types.
-    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    #[allow(unused_mut)]
+    let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+
+    // macOS: pin the Dock / focus / Cmd-Tab behavior of the detached child.
+    //
+    // The detached child is a bare Rust binary (no `.app` bundle, no
+    // `Info.plist`). The concern (issue #6) was that without a bundle the
+    // window might not get a Dock icon, might not take focus on launch, and
+    // might be excluded from the Cmd-Tab switcher.
+    //
+    // In practice tao already defaults to `NSApplicationActivationPolicyRegular`
+    // and calls `activateIgnoringOtherApps:` on `applicationDidFinishLaunching`,
+    // so the child *does* show a Dock icon, take focus, and join Cmd-Tab even
+    // without a bundle. We set the policy explicitly anyway so the requirement
+    // is pinned to TinyView (not left to tao's default, which could change) and
+    // the intent is documented at the call site. `set_activation_policy` must
+    // be called before `run`/`run_return`, which is the case here.
+    //
+    // What this does NOT fix: the app name shown in the menu bar / Cmd-Tab is
+    // the binary name ("tinyview") and there is no app icon, because there is
+    // no `.app` bundle. That UX gap is tracked in #11.
+    #[cfg(target_os = "macos")]
+    {
+        use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+        event_loop.set_activation_policy(ActivationPolicy::Regular);
+    }
 
     // Transparency is a *two-layer* contract:
     //   1. tao's NSWindow / HWND must be transparent so the OS compositor

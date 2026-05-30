@@ -318,6 +318,23 @@ time except in `raw` mode (raw assumes trusted input — `--allow-*` flags re-en
 child's stdin so the no-temp-file invariant holds. The child opens the native WebView and runs the
 event loop. `--watch` skips detach and re-renders on file change via `notify-debouncer-mini`.
 
+### macOS: detached window behavior
+
+The detached child is a bare Rust binary — there is no `.app` bundle and no `Info.plist`.
+Despite that, the window behaves like a normal app window: `tao` defaults the activation policy
+to `NSApplicationActivationPolicyRegular` and activates the app on launch, so the detached child
+
+- **shows a Dock icon**,
+- **takes keyboard focus** when the window opens, and
+- **is included in the Cmd-Tab application switcher**.
+
+TinyView additionally sets `ActivationPolicy::Regular` explicitly on the child's event loop so this
+behavior is pinned to TinyView rather than left to a framework default.
+
+Known gap: without a bundle, the app name shown in the menu bar / Cmd-Tab is the raw binary name
+(`tinyview`) and there is no custom app icon. Packaging as a proper `.app` for full system
+integration is tracked in [#11](https://github.com/TakakiAraki09/tiny-view/issues/11).
+
 Full design and rationale: [`docs/PRD.md`](docs/PRD.md).
 
 ---
