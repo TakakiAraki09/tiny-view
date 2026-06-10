@@ -498,7 +498,7 @@ required Rust, this job fails instead of letting the drift reach downstream cons
 cargo test                  # unit tests (CSP construction, injection, CLI parsing)
 ```
 
-The `--allow-*` flags are additionally covered by a **live-WebView E2E self-test** that drives a
+The permission grants (the meta fetch grant and the `--allow-*` flags) are additionally covered by a **live-WebView E2E self-test** that drives a
 real WebView through the production build path and reads page-side JS behavior back over a
 feature-gated IPC channel (`src/e2e.rs`). The bridge it needs is compiled **only** under the `e2e`
 feature, so the production binary never carries a JS→native bridge.
