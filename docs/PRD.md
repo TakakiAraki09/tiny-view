@@ -421,6 +421,18 @@ tinyview app.html --foreground
 
 `--watch` は §9.10 のとおり `--foreground` を暗黙的に強制するため、`tinyview README.md --watch` は明示的な `--foreground` 指定不要。
 
+## 9.12 Guide
+
+```bash
+tinyview --guide template
+```
+
+組み込みガイド（バイナリに `include_str!` で同梱）を標準出力に表示して即終了する。入力読み込み・config 読み込み・WebView 起動・detach は一切行わない print-and-exit パスであり、raw fast path への影響はフラグ判定 1 回のみ（§5.1 の起動速度 KPI に影響しない）。
+
+topic は `clap::ValueEnum` で列挙され、現状は `template`（template 自作ガイド、`src/guides/template.md`）のみ。不正な topic はエラーとなり、利用可能な値が表示される。
+
+人間向けであると同時に、AI agent が自作 template を生成する際のコンテキストとしてそのまま渡せるよう設計されている。
+
 ---
 
 # 10. Template System
