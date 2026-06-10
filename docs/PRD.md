@@ -733,28 +733,28 @@ TinyView は以下をデフォルトで提供しない。
 ## 19.2 Optional Permissions
 
 ```bash
-tinyview app.html --allow-fetch
 tinyview app.html --allow-clipboard
 tinyview app.html --allow-storage
 ```
 
 | フラグ              | runtime 動作                                                                                   |
 | ------------------- | ---------------------------------------------------------------------------------------------- |
-| `--allow-fetch`     | 注入 CSP の `connect-src` を `'none'` から `https: http: ws: wss:` に緩和                      |
 | `--allow-clipboard` | wry `with_clipboard(true)`（macOS では既にOS側で許可されており差分なし）                       |
 | `--allow-storage`   | wry `with_incognito(false)` + `WebContext` を永続パスで構成。プロセス終了後も DataStore が残る |
 
+fetch（外向き `fetch` / XHR / WebSocket）に CLI フラグは存在しない。fetch の許可手段は §19.2.1 の `<meta name="tinyview-allow">` のみ。
+
 ### 19.2.1 `<meta>` による fetch 許可
 
-`--allow-fetch` を毎回 CLI で指定する手間を省くため、template / 入力 HTML 側の `<head>` に以下を置くことでも同等に許可できる:
+fetch を必要とするコンテンツは、template / 入力 HTML 側の `<head>` に以下を置いて自己宣言する。これが **唯一の** fetch 許可手段であり、CLI フラグは存在しない:
 
 ```html
 <meta name="tinyview-allow" content="fetch">
 ```
 
+- 宣言があると runtime は注入 CSP の `connect-src` を `'none'` から `https: http: ws: wss:` に緩和する。
 - `content` はスペース区切りのトークンリスト。現状認識するのは `fetch` のみ（例 `content="fetch"`）。
-- CLI フラグ `--allow-fetch` とは **OR 関係**。どちらか一方でも許可されれば `connect-src` が緩和される。
-- **信頼モデル**: TinyView は利用者自身が pipe / 指定した HTML のみを描画するため、自己宣言の `<meta>` は利用者の意図表明とみなす（§19 の信頼境界）。リモートコンテンツを開かない前提なので、HTML が自分自身に fetch 権限を宣言できても境界は破られない。
+- **信頼モデル**: TinyView は利用者自身が pipe / 指定した HTML のみを描画するため、自己宣言の `<meta>` は利用者の意図表明とみなす（§19 の信頼境界）。リモートコンテンツを開かない前提なので、HTML が自分自身に fetch 権限を宣言できても境界は破られない。この信頼モデルが成立するからこそ、CLI フラグではなくコンテンツ自身による自己宣言に一本化している — 必要権限はコンテンツが知っており、毎回 CLI で指定させるのは「即座にプレビュー」体験に反する。
 - `fetch` 以外（clipboard / storage）は §19.4 / opaque-origin 制約により meta では許可せず、CLI フラグのみ。
 - これは §19.4 が禁じる `<meta http-equiv="Content-Security-Policy">`（CSP 直書き）とは **別物**。`name="tinyview-allow"` は CSP を直接書くのではなく runtime に許可を宣言するだけで、最終的な CSP `<meta http-equiv>` は runtime が排他的に生成する。
 
@@ -780,7 +780,7 @@ CSP は runtime が排他的に管理する。**Template HTML 側に `<meta http
 
 ## 19.5 raw mode と Security
 
-`raw` mode (§13.1) でも §19.3 の WebView builder デフォルト (incognito / devtools / clipboard / navigation_handler) は適用される。ただし CSP `<meta>` 注入は起動最速優先のため **skip する** — raw mode の利用者は信頼できる入力を流す責務を負う。`--allow-*` フラグ、または `<meta name="tinyview-allow">` による許可 (§19.2.1) が存在する場合のみ CSP 注入が走る（許可されたスライスを反映した CSP を当てる必要があるため）。
+`raw` mode (§13.1) でも §19.3 の WebView builder デフォルト (incognito / devtools / clipboard / navigation_handler) は適用される。ただし CSP `<meta>` 注入は起動最速優先のため **skip する** — raw mode の利用者は信頼できる入力を流す責務を負う。`--allow-*` フラグ（clipboard / storage）、または `<meta name="tinyview-allow">` による fetch 許可 (§19.2.1) が存在する場合のみ CSP 注入が走る（許可されたスライスを反映した CSP を当てる必要があるため）。
 
 ---
 

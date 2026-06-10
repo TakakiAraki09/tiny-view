@@ -72,10 +72,6 @@ struct Cli {
     #[arg(long)]
     watch: bool,
 
-    /// Allow outbound fetch / XHR / WebSocket (relaxes CSP connect-src)
-    #[arg(long)]
-    allow_fetch: bool,
-
     /// Allow clipboard API (no-op on macOS native shortcuts)
     #[arg(long)]
     allow_clipboard: bool,
@@ -364,8 +360,12 @@ fn run_as_child(cli: Cli) -> ExitCode {
         transparent: cli.transparent,
     };
     let raw_mode = detach::detached_raw_mode();
+    // Fetch is meta-granted only (PRD §19.2.1): the grant lives inside the
+    // composed HTML itself (`<meta name="tinyview-allow" content="fetch">`),
+    // so it survives the detach round-trip without any flag forwarding —
+    // `webview::effective_perms` re-derives it from the HTML in the child.
     let perms = Permissions {
-        allow_fetch: cli.allow_fetch,
+        allow_fetch: false,
         allow_clipboard: cli.allow_clipboard,
         allow_storage: cli.allow_storage,
     };
@@ -454,8 +454,11 @@ fn run(cli: Cli) -> ExitCode {
         .or(cfg.and_then(|c| c.window_height))
         .unwrap_or(760);
 
+    // Fetch is meta-granted only (PRD §19.2.1): `webview::effective_perms`
+    // derives the effective `allow_fetch` from the HTML's
+    // `<meta name="tinyview-allow" content="fetch">` tag. No CLI source exists.
     let perms = Permissions {
-        allow_fetch: cli.allow_fetch,
+        allow_fetch: false,
         allow_clipboard: cli.allow_clipboard,
         allow_storage: cli.allow_storage,
     };
@@ -495,7 +498,6 @@ fn run(cli: Cli) -> ExitCode {
         width,
         height,
         raw_mode,
-        allow_fetch: cli.allow_fetch,
         allow_clipboard: cli.allow_clipboard,
         allow_storage: cli.allow_storage,
         frameless: cli.frameless,
@@ -566,7 +568,7 @@ mod tests {
     #[test]
     fn cli_frameless_and_transparent_coexist_with_existing_flags() {
         // Regression guard: make sure adding the new flags didn't shadow or
-        // collide with width/height/--allow-fetch/--foreground argument parsing.
+        // collide with width/height/--foreground argument parsing.
         let cli = Cli::try_parse_from([
             "tinyview",
             "file.html",
@@ -576,7 +578,6 @@ mod tests {
             "640",
             "--height",
             "480",
-            "--allow-fetch",
             "--foreground",
         ])
         .expect("parse");
@@ -584,8 +585,15 @@ mod tests {
         assert!(cli.transparent);
         assert_eq!(cli.width, Some(640));
         assert_eq!(cli.height, Some(480));
-        assert!(cli.allow_fetch);
         assert!(cli.foreground);
+    }
+
+    #[test]
+    fn cli_rejects_removed_allow_fetch_flag() {
+        // Breaking change (PRD §19.2.1): fetch is granted only via
+        // `<meta name="tinyview-allow" content="fetch">` in the HTML.
+        // The former `--allow-fetch` flag must no longer parse.
+        assert!(Cli::try_parse_from(["tinyview", "file.html", "--allow-fetch"]).is_err());
     }
 
     #[test]

@@ -67,7 +67,10 @@ pub struct SpawnOpts<'a> {
     pub width: u32,
     pub height: u32,
     pub raw_mode: bool,
-    pub allow_fetch: bool,
+    // NOTE: fetch permission is intentionally absent here. It is granted only
+    // via `<meta name="tinyview-allow" content="fetch">` inside the composed
+    // HTML (PRD §19.2.1), which travels through the stdin pipe — the child
+    // re-derives it with `webview::effective_perms`.
     pub allow_clipboard: bool,
     pub allow_storage: bool,
     /// PRD §9.8 — pass `--frameless` to the detached child.
@@ -88,9 +91,6 @@ pub fn spawn(opts: &SpawnOpts<'_>) -> std::io::Result<()> {
     }
     cmd.arg("--width").arg(opts.width.to_string());
     cmd.arg("--height").arg(opts.height.to_string());
-    if opts.allow_fetch {
-        cmd.arg("--allow-fetch");
-    }
     if opts.allow_clipboard {
         cmd.arg("--allow-clipboard");
     }

@@ -233,11 +233,13 @@ tinyview app.html --foreground
 | `--transparent`       | Transparent window background. Combine with `rgba(_,_,_,<1)` CSS.    |
 | `--watch`             | Reload on file change. File input only. Implies `--foreground`.      |
 | `--foreground`        | Skip detach; stay attached to the shell.                             |
-| `--allow-fetch`       | Loosen CSP `connect-src` to allow outbound `fetch` / XHR / WS.       |
 | `--allow-clipboard`   | Enable clipboard API in the WebView. See *Permissions* below.        |
 | `--allow-storage`     | Persist WebView storage (disables incognito mode).                   |
 | `-h, --help`          | Show usage.                                                          |
 | `-V, --version`       | Show version.                                                        |
+
+There is no CLI flag for outbound `fetch`: a document grants itself network access with
+`<meta name="tinyview-allow" content="fetch">` in its `<head>`. See *Permissions* below.
 
 Input resolution priority: **stdin (when it has data) > file path > `--html`**.
 
@@ -351,11 +353,11 @@ Built-in templates: `raw` (no substitution, fastest path), `text` (escaped monos
 
 TinyView denies by default: no fetch, no clipboard, no persistent storage, no DevTools (release),
 no native bridge, no top-level external navigation. A strict CSP `<meta>` is injected at render
-time except in `raw` mode (raw assumes trusted input — `--allow-*` flags re-enable CSP injection).
+time except in `raw` mode (raw assumes trusted input — `--allow-*` flags or the
+`tinyview-allow` meta re-enable CSP injection).
 
 | Flag                | Effect                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------- |
-| `--allow-fetch`     | Relax CSP `connect-src` from `'none'` to `https: http: ws: wss:`.                           |
 | `--allow-clipboard` | Enable wry clipboard. **macOS caveat:** WKWebView exposes Cmd+C/V at the OS level and cannot be fully disabled. |
 | `--allow-storage`   | Disable incognito; persist DataStore between runs.                                          |
 
@@ -363,13 +365,15 @@ time except in `raw` mode (raw assumes trusted input — `--allow-*` flags re-en
 > `with_html` with no base URL, so the document runs in an **opaque origin**. The Clipboard
 > API (`navigator.clipboard`) is secure-context-gated and `localStorage` throws
 > `SecurityError` in an opaque origin — so on the in-memory path these are **not reachable
-> from page JS even with the flags set**. `--allow-fetch` is unaffected because it is enforced
+> from page JS even with the flags set**. The fetch grant is unaffected because it is enforced
 > purely through the CSP `<meta>`. This is verified by the E2E self-test (see *Contributing*).
 
-> **Grant fetch without the flag.** A template or input document can opt into outbound fetch by
-> putting `<meta name="tinyview-allow" content="fetch">` in its `<head>` — equivalent to
-> `--allow-fetch` and OR'd with it (whichever grants it wins). `content` is a space-separated token
-> list; only `fetch` is recognized today. Clipboard/storage stay CLI-only. See PRD §19.2.1.
+> **Granting fetch.** Outbound fetch has no CLI flag. A template or input document opts into it by
+> putting `<meta name="tinyview-allow" content="fetch">` in its `<head>` — the runtime then relaxes
+> CSP `connect-src` from `'none'` to `https: http: ws: wss:`. Content declares its own needs:
+> since TinyView only renders HTML you piped or pointed it at, self-declaration cannot cross the
+> trust boundary. `content` is a space-separated token list; only `fetch` is recognized today.
+> Clipboard/storage stay CLI-only. See PRD §19.2.1.
 
 ---
 
