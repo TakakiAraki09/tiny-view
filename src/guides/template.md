@@ -1,8 +1,11 @@
 # TinyView Template 自作ガイド
 
 このドキュメントは、TinyView 用の **自作 template** を作るための実装者向けガイドです。
-仕様の最終的な正典は [`docs/PRD.md`](./PRD.md)（特に §13 / §14 / §15 / §19）です。
+仕様の最終的な正典は [`docs/PRD.md`](../../docs/PRD.md)（特に §13 / §14 / §15 / §19）です。
 本ガイドはそれを「template を書く側」の視点で噛み砕いたものです。
+
+本ガイドは `tinyview --guide template` でいつでも標準出力に表示できます。
+AI agent に template を生成させる際のコンテキストとしても、そのまま渡して使えます。
 
 ---
 
