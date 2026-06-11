@@ -83,7 +83,28 @@ struct Cli {
     /// Persist WebView storage across runs (disables incognito)
     #[arg(long)]
     allow_storage: bool,
+
+    /// Print a built-in guide to stdout and exit. Designed as context
+    /// for AI agents as well as humans (e.g. `tinyview --guide template`
+    /// before authoring a custom template).
+    #[arg(long, value_enum, value_name = "TOPIC")]
+    guide: Option<GuideTopic>,
 }
+
+/// Topics accepted by `--guide`. Extend this enum to ship additional
+/// built-in guides; clap derives the CLI surface (possible values, error
+/// messages) from the variants.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum GuideTopic {
+    /// Authoring guide for custom templates (marker contract, schema,
+    /// config, permissions). Written in Japanese.
+    Template,
+}
+
+/// Embedded at compile time so the guide ships inside the binary — no
+/// runtime file lookup, no install-path assumptions (the crate excludes
+/// `docs/` from packaging, so the source of truth lives under `src/guides/`).
+const TEMPLATE_GUIDE: &str = include_str!("guides/template.md");
 
 fn parse_param(s: &str) -> Result<(String, String), String> {
     let (k, v) = s
@@ -522,6 +543,16 @@ fn main() -> ExitCode {
 
     let cli = Cli::parse();
 
+    // `--guide` is a print-and-exit path: no input reading, no config load,
+    // no WebView, no detach. Checked first so it stays off the raw fast path
+    // (a single Option check) and never spawns anything.
+    if let Some(topic) = cli.guide {
+        match topic {
+            GuideTopic::Template => print!("{TEMPLATE_GUIDE}"),
+        }
+        return ExitCode::SUCCESS;
+    }
+
     if detach::is_detached_child() {
         return run_as_child(cli);
     }
@@ -586,6 +617,29 @@ mod tests {
         assert_eq!(cli.height, Some(480));
         assert!(cli.allow_fetch);
         assert!(cli.foreground);
+    }
+
+    #[test]
+    fn cli_parses_guide_template() {
+        let cli = Cli::try_parse_from(["tinyview", "--guide", "template"]).expect("parse");
+        assert!(matches!(cli.guide, Some(GuideTopic::Template)));
+    }
+
+    #[test]
+    fn cli_rejects_unknown_guide_topic() {
+        // clap's ValueEnum owns the error surface (lists possible values);
+        // we only assert that parsing fails.
+        let err = Cli::try_parse_from(["tinyview", "--guide", "bogus"]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn template_guide_embeds_marker_contract() {
+        // Sanity-check the include_str! payload: the guide must document the
+        // injection marker and the injected global verbatim, otherwise the
+        // embedded file is stale or the wrong one got bundled.
+        assert!(TEMPLATE_GUIDE.contains("/*__TINYVIEW__*/ null /*__TINYVIEW__*/"));
+        assert!(TEMPLATE_GUIDE.contains("window.__TINYVIEW__"));
     }
 
     #[test]

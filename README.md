@@ -345,6 +345,16 @@ Built-in templates: `raw` (no substitution, fastest path), `text` (escaped monos
 `minimal` (centered HTML fragment shell), and the optional `markdown` / `mermaid` / `code`
 (library bundled and inlined at render time).
 
+For the full template authoring guide — marker contract, injected schema, config wiring, and
+permission interactions — run:
+
+```bash
+tinyview --guide template
+```
+
+It prints the complete guide (written in Japanese) to stdout. The output is designed to be
+pasted directly into an AI coding agent's context when asking it to author a custom template.
+
 ---
 
 ## Permissions

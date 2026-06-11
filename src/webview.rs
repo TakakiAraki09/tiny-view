@@ -131,8 +131,8 @@ fn meta_allows_fetch(html: &str) -> bool {
             None => break,
         };
         let tag = &lower[tag_start..tag_end];
-        let is_allow_tag = tag.contains("name=\"tinyview-allow\"")
-            || tag.contains("name='tinyview-allow'");
+        let is_allow_tag =
+            tag.contains("name=\"tinyview-allow\"") || tag.contains("name='tinyview-allow'");
         if is_allow_tag {
             if let Some(content) = extract_attr(tag, "content") {
                 if content.split_whitespace().any(|t| t == "fetch") {
