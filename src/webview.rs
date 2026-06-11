@@ -15,9 +15,15 @@ use wry::{WebView, WebViewBuilder};
 /// User-controlled permission relaxations.
 ///
 /// Each flag relaxes exactly one slice of the default-deny policy.
+/// `allow_clipboard` / `allow_storage` are granted via CLI flags;
+/// `allow_fetch` is an *effective* permission derived solely from an inline
+/// `<meta name="tinyview-allow" content="fetch">` tag in the HTML (see
+/// [`effective_perms`]) — there is no CLI flag for it.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Permissions {
     /// Relax CSP `connect-src` from `'none'` to `https: http: ws: wss:`.
+    /// Effective permission: sourced only from the HTML's
+    /// `<meta name="tinyview-allow" content="fetch">` (PRD §19.2.1).
     pub allow_fetch: bool,
     /// Pass `with_clipboard(true)` to wry. macOS is always-on at the OS
     /// level and cannot be fully disabled; see PRD §19.3.
@@ -34,8 +40,9 @@ pub struct BuildOptions<'a> {
     pub html: &'a str,
     pub perms: Permissions,
     /// Raw mode skips CSP `<meta>` injection (PRD §19.5). WebView
-    /// builder defaults are still applied. `--allow-*` flags force CSP
-    /// injection regardless of this flag.
+    /// builder defaults are still applied. Any granted permission
+    /// (`--allow-*` flag or an inline `<meta name="tinyview-allow">`
+    /// fetch grant) forces CSP injection regardless of this flag.
     pub raw_mode: bool,
     /// PRD §9.9: enable per-pixel transparency on the WebView. Must be
     /// paired with `WindowBuilder::with_transparent(true)` on the host
@@ -112,12 +119,12 @@ fn extract_attr(tag: &str, attr: &str) -> Option<String> {
 /// Scan the HTML for a `<meta name="tinyview-allow" content="...">` tag and
 /// return true when the space-separated `content` token list includes `fetch`.
 ///
-/// This lets a template/document opt into outbound fetch (XHR / WebSocket)
-/// without the CLI `--allow-fetch` flag; the two are OR'd (see [`effective_perms`]).
-/// The trust model is that TinyView only renders content the user themselves
-/// pipes in, so a self-declared `<meta>` is an expression of the user's intent
-/// (PRD §19). Only `fetch` is meta-grantable today; clipboard/storage remain
-/// CLI-only.
+/// This is the *only* way to grant outbound fetch (XHR / WebSocket): the
+/// former `--allow-fetch` CLI flag was removed (PRD §19.2.1), so the grant
+/// lives entirely in the template/document itself. The trust model is that
+/// TinyView only renders content the user themselves pipes in, so a
+/// self-declared `<meta>` is an expression of the user's intent (PRD §19).
+/// Only `fetch` is meta-grantable; clipboard/storage remain CLI-only.
 ///
 /// Like the rest of this module we use a deliberately simple string scan rather
 /// than a real HTML parser (CLAUDE.md KPI #1: startup time).
@@ -131,8 +138,8 @@ fn meta_allows_fetch(html: &str) -> bool {
             None => break,
         };
         let tag = &lower[tag_start..tag_end];
-        let is_allow_tag = tag.contains("name=\"tinyview-allow\"")
-            || tag.contains("name='tinyview-allow'");
+        let is_allow_tag =
+            tag.contains("name=\"tinyview-allow\"") || tag.contains("name='tinyview-allow'");
         if is_allow_tag {
             if let Some(content) = extract_attr(tag, "content") {
                 if content.split_whitespace().any(|t| t == "fetch") {
@@ -145,10 +152,12 @@ fn meta_allows_fetch(html: &str) -> bool {
     false
 }
 
-/// Combine CLI-granted permissions with permissions declared inline in the HTML
-/// via `<meta name="tinyview-allow" ...>`. Currently only `fetch` is
-/// meta-grantable, and it is OR'd with the `--allow-fetch` flag (whichever
-/// grants it wins). Clipboard/storage are unaffected (CLI-only).
+/// Combine caller-supplied permissions with permissions declared inline in the
+/// HTML via `<meta name="tinyview-allow" ...>`. Currently only `fetch` is
+/// meta-grantable, and the meta scan is its sole production source (the
+/// `--allow-fetch` CLI flag was removed; callers pass `allow_fetch: false`).
+/// A pre-set `allow_fetch` still passes through unchanged (OR semantics).
+/// Clipboard/storage are unaffected (CLI-only).
 fn effective_perms(html: &str, perms: &Permissions) -> Permissions {
     let mut eff = *perms;
     if !eff.allow_fetch && meta_allows_fetch(html) {
@@ -241,8 +250,9 @@ const ZOOM_SCRIPT: &str = "\
 /// has the same CSP `<meta>` injected as the initial render.
 ///
 /// Mirrors the `inject_csp_now` rule in [`build`]: CSP is injected unless
-/// `raw_mode` is set AND no permission has been granted (by flag *or* by an
-/// inline `<meta name="tinyview-allow">` — see [`effective_perms`]).
+/// `raw_mode` is set AND no permission has been granted (by `--allow-*` flag
+/// for clipboard/storage *or* by an inline `<meta name="tinyview-allow">`
+/// fetch grant — see [`effective_perms`]).
 pub fn prepare_html(html: &str, perms: &Permissions, raw_mode: bool) -> String {
     let perms = effective_perms(html, perms);
     let any_perm = perms.allow_fetch || perms.allow_clipboard || perms.allow_storage;
@@ -266,10 +276,11 @@ pub fn prepare_html(html: &str, perms: &Permissions, raw_mode: bool) -> String {
 ///   - An initialization script enabling Cmd/Ctrl +/-/0 zoom (all platforms)
 ///
 /// CSP `<meta>` is injected into HTML unless `opts.raw_mode` is set AND
-/// no permission flag has been granted (PRD §19.5).
+/// no permission has been granted (PRD §19.5).
 pub fn build(window: &Window, opts: BuildOptions<'_>) -> wry::Result<WebView> {
-    // Fold any inline `<meta name="tinyview-allow">` grant into the CLI perms
-    // before deciding CSP/injection (PRD §19; OR semantics).
+    // Fold any inline `<meta name="tinyview-allow">` fetch grant into the
+    // caller perms before deciding CSP/injection (PRD §19; OR semantics).
+    // This is the sole production source of `allow_fetch` (PRD §19.2.1).
     let perms = effective_perms(opts.html, &opts.perms);
     let any_perm = perms.allow_fetch || perms.allow_clipboard || perms.allow_storage;
     let inject_csp_now = !opts.raw_mode || any_perm;
@@ -507,13 +518,15 @@ mod tests {
     }
 
     #[test]
-    fn effective_perms_ors_meta_with_flag() {
+    fn effective_perms_meta_grants_fetch() {
         let html = r#"<meta name="tinyview-allow" content="fetch">"#;
-        // CLI flag off, meta on -> fetch granted.
+        // No prior grant, meta present -> fetch granted (the only production
+        // source since the `--allow-fetch` flag was removed).
         let eff = effective_perms(html, &Permissions::default());
         assert!(eff.allow_fetch);
 
-        // CLI flag on, no meta -> still granted (OR).
+        // Pre-set allow_fetch (e.g. e2e harness), no meta -> passes through
+        // unchanged (OR semantics).
         let eff = effective_perms(
             "<head></head>",
             &Permissions {

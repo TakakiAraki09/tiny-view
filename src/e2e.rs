@@ -1,10 +1,13 @@
-//! Live-WebView self-test harness for the `--allow-*` permission flags
-//! (issue #5). Compiled only under the `e2e` feature.
+//! Live-WebView self-test harness for the permission grants (issue #5):
+//! the `<meta name="tinyview-allow" content="fetch">` fetch grant and the
+//! `--allow-clipboard` / `--allow-storage` flags. Compiled only under the
+//! `e2e` feature.
 //!
 //! ## Why this exists
 //!
-//! `--allow-fetch` / `--allow-clipboard` / `--allow-storage` are unit-tested at
-//! the string level (CSP construction, injection) in `webview.rs`, but those
+//! The meta fetch grant and `--allow-clipboard` / `--allow-storage` are
+//! unit-tested at the string level (CSP construction, injection) in
+//! `webview.rs`, but those
 //! tests cannot prove the *browser* actually honors them. This harness drives a
 //! real `WebView` (built through the production [`crate::webview::build`] path,
 //! so CSP injection / incognito / clipboard neutralization all apply) and reads
@@ -59,9 +62,10 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// Listens for a `connect-src` `securitypolicyviolation`, fires a `fetch`, then
 /// reports `blocked` / `allowed` after a short settle delay. Under the default
-/// CSP (`connect-src 'none'`) the violation fires and we expect `blocked`; with
-/// `--allow-fetch` no violation fires (the request proceeds to the network,
-/// success or network-error irrelevant) and we expect `allowed`.
+/// CSP (`connect-src 'none'`) the violation fires and we expect `blocked`; when
+/// the page grants fetch via `<meta name="tinyview-allow" content="fetch">`
+/// no violation fires (the request proceeds to the network, success or
+/// network-error irrelevant) and we expect `allowed`.
 const FETCH_PROBE: &str = r#"
 (function () {
   var blocked = false;
@@ -127,6 +131,10 @@ struct Step {
     id: &'static str,
     perms: Permissions,
     probe: &'static str,
+    /// Put `<meta name="tinyview-allow" content="fetch">` in the page `<head>`,
+    /// exercising the production fetch-grant path (PRD §19.2.1) — the only way
+    /// to grant fetch since the `--allow-fetch` flag was removed.
+    meta_allow_fetch: bool,
 }
 
 /// State for the currently-running scenario. Window + WebView are owned here so
@@ -139,9 +147,14 @@ struct Active {
     started: Instant,
 }
 
-fn html_for(probe: &str) -> String {
+fn html_for(probe: &str, meta_allow_fetch: bool) -> String {
+    let allow_meta = if meta_allow_fetch {
+        r#"<meta name="tinyview-allow" content="fetch">"#
+    } else {
+        ""
+    };
     format!(
-        "<!doctype html><html><head><title>e2e</title></head>\
+        "<!doctype html><html><head>{allow_meta}<title>e2e</title></head>\
          <body><script>{probe}</script></body></html>"
     )
 }
@@ -156,11 +169,12 @@ fn start_step(target: &EventLoopWindowTarget<()>, step: &Step) -> Result<Active,
         .map_err(|e| format!("window build failed: {e}"))?;
 
     let (tx, rx) = mpsc::channel::<String>();
-    let html = html_for(step.probe);
+    let html = html_for(step.probe, step.meta_allow_fetch);
 
     // `raw_mode = false` so CSP is always injected (the point of the fetch
-    // check). Permission flags additionally widen the CSP / toggle incognito
-    // inside `build`.
+    // check). Granted permissions (meta fetch grant folded in by
+    // `effective_perms`, clipboard/storage flags) additionally widen the CSP /
+    // toggle incognito inside `build`.
     let webview = webview::build(
         &window,
         BuildOptions {
@@ -183,10 +197,6 @@ fn start_step(target: &EventLoopWindowTarget<()>, step: &Step) -> Result<Active,
 
 /// Run all permission scenarios and aggregate a report.
 pub fn run_selftest() -> ExitCode {
-    let allow_fetch = Permissions {
-        allow_fetch: true,
-        ..Default::default()
-    };
     let allow_clipboard = Permissions {
         allow_clipboard: true,
         ..Default::default()
@@ -197,55 +207,65 @@ pub fn run_selftest() -> ExitCode {
     };
 
     let steps = [
-        // --allow-fetch: default blocks, flag permits.
+        // fetch: default blocks; `<meta name="tinyview-allow" content="fetch">`
+        // in the page grants it (the only grant path — no CLI flag exists).
         Step {
             id: "fetch_off",
             perms: Permissions::default(),
             probe: FETCH_PROBE,
+            meta_allow_fetch: false,
         },
         Step {
             id: "fetch_on",
-            perms: allow_fetch,
+            perms: Permissions::default(),
             probe: FETCH_PROBE,
+            meta_allow_fetch: true,
         },
         // --allow-clipboard: default neutralizes (macOS), flag exposes.
         Step {
             id: "clip_off",
             perms: Permissions::default(),
             probe: CLIPBOARD_PROBE,
+            meta_allow_fetch: false,
         },
         Step {
             id: "clip_on",
             perms: allow_clipboard,
             probe: CLIPBOARD_PROBE,
+            meta_allow_fetch: false,
         },
         // --allow-storage OFF: incognito → a fresh webview can't see a prior write.
         Step {
             id: "store_off_set",
             perms: Permissions::default(),
             probe: STORAGE_SET_PROBE,
+            meta_allow_fetch: false,
         },
         Step {
             id: "store_off_get",
             perms: Permissions::default(),
             probe: STORAGE_GET_PROBE,
+            meta_allow_fetch: false,
         },
         // --allow-storage ON: persistent → write is visible to the next webview.
         Step {
             id: "store_on_set",
             perms: allow_storage,
             probe: STORAGE_SET_PROBE,
+            meta_allow_fetch: false,
         },
         Step {
             id: "store_on_get",
             perms: allow_storage,
             probe: STORAGE_GET_PROBE,
+            meta_allow_fetch: false,
         },
         // Best-effort cleanup of the persisted sentinel.
         Step {
             id: "cleanup",
             perms: allow_storage,
             probe: STORAGE_CLEANUP_PROBE,
+            meta_allow_fetch: false,
         },
     ];
 
@@ -313,15 +333,15 @@ pub fn run_selftest() -> ExitCode {
 
     let mut report = Report::default();
 
-    // ---- --allow-fetch ----------------------------------------------------
+    // ---- fetch (meta-granted) ----------------------------------------------
     report.check(
-        "allow-fetch: default CSP blocks fetch",
+        "fetch: default CSP blocks fetch",
         g("fetch_off") == "blocked",
         false,
         g("fetch_off"),
     );
     report.check(
-        "allow-fetch: flag permits fetch (no CSP block)",
+        "fetch: <meta name=\"tinyview-allow\"> grants fetch (no CSP block)",
         g("fetch_on") == "allowed",
         false,
         g("fetch_on"),
@@ -399,7 +419,7 @@ impl Report {
 
 fn print_report(report: &Report) -> ExitCode {
     println!(
-        "\n=== tinyview --allow-* E2E self-test ({}) ===",
+        "\n=== tinyview permissions E2E self-test ({}) ===",
         std::env::consts::OS
     );
     for p in &report.passes {

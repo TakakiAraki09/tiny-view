@@ -100,7 +100,7 @@ Rust + wry + tao
 
 ## セキュリティデフォルト
 
-JS から native bridge / shell exec / filesystem / Node API は提供しない。必要な場合のみ `--allow-fetch` / `--allow-clipboard` / `--allow-storage` で明示許可。fetch は template/HTML の `<head>` に `<meta name="tinyview-allow" content="fetch">` を置くことでも許可できる（`--allow-fetch` と OR。PRD §19.2.1）。
+JS から native bridge / shell exec / filesystem / Node API は提供しない。必要な場合のみ明示許可する。clipboard / storage は CLI フラグ `--allow-clipboard` / `--allow-storage` で、fetch は template/HTML の `<head>` に置く `<meta name="tinyview-allow" content="fetch">` **のみ**で許可する（fetch の CLI フラグは存在しない。PRD §19.2.1）。
 
 ## 作業時のチェックリスト
 
