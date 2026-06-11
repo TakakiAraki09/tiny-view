@@ -1,0 +1,68 @@
+{
+  "skill_name": "agent-repo-bootstrap",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "mdcal という CLI ツールを作り始めたい。標準入力からスケジュール一覧の CSV を受け取って、ターミナルに月間カレンダーとして表示するやつ。Rust で書く。/tmp/eval-mdcal にリポジトリを立ち上げて。今後は AI エージェント主体で開発を回したいので、開発体制から整えてほしい。",
+      "expected_output": "Rust プロジェクトとして初期化され、docs/PRD.md（§番号・絶対条件・KPI表）、CLAUDE.md、*.test.md、CI ゲート、リリースフロー文書、worktree 強制 hook、オーケストレーションスキルが揃ったリポジトリ",
+      "files": [],
+      "assertions": [
+        "docs/PRD.md が存在し、§番号付きセクションがあり、絶対条件が検証可能な禁止/保証の形で3個以上列挙されている",
+        "PRD に優先順位付き KPI があり、数値目標と hard/soft（CI ゲート/手動検証）の分類が明記されている",
+        "CLAUDE.md が存在し、絶対条件・KPI 優先順位・作業前チェックリスト・「PRD が正」の明記を含む",
+        "CLAUDE.md またはリリース文書に Conventional Commits 規約と prefix→bump の対応表があり、バージョン/タグの手動変更禁止が書かれている",
+        ".claude/settings.json に PreToolUse hook が登録され、hook スクリプトが primary worktree 判定（git-dir と git-common-dir の比較）を含み、primary worktree でブロック・リンク worktree で許可の両方が動作する",
+        "*.test.md テスト仕様表が存在し、PRD §番号またはテスト関数名を備考に持つ実エントリがあり、エントリが実在するテストと一致する",
+        "CI 設定が存在し、警告をエラー扱いにする lint、format チェック、テスト実行、KPI 計測 job を含む",
+        "リリース設定または文書に「リリース PR の自動生成」と「publish は手動トリガーのみ」の2段階分離が記述されている",
+        "言語エコシステムとして妥当に初期化され、テストが実際に通る（または実行不能な環境制約が report に明記されている）",
+        "生成された文書に <...> プレースホルダや未記入 TODO が残っていない（明示的な「要確認」マークは除く）"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "新しいプロジェクトを始めたい。TypeScript の npm ライブラリで、JSON Schema から zod のスキーマコードを生成する codegen ツール。名前は json2zod。/tmp/eval-json2zod に新規リポジトリを作って。継続的にエージェントに開発させたいから、ちゃんとした体制で頼む。",
+      "expected_output": "Node/TypeScript プロジェクトとして初期化され、同様の文書層・トレーサビリティ・CI ゲート・2段階リリース・隔離 hook が npm エコシステムに適合した形で揃ったリポジトリ",
+      "files": [],
+      "assertions": [
+        "docs/PRD.md が存在し、§番号付きセクションがあり、絶対条件が検証可能な禁止/保証の形で3個以上列挙されている",
+        "PRD に優先順位付き KPI があり、数値目標と hard/soft の分類が明記されている",
+        "CLAUDE.md が存在し、絶対条件・KPI 優先順位・作業前チェックリスト・「PRD が正」の明記を含む",
+        "CLAUDE.md またはリリース文書に Conventional Commits 規約と prefix→bump の対応表があり、リリースツールが所有する成果物（バージョン/タグ/CHANGELOG、lockfile は存在する場合）の手動変更禁止が書かれている",
+        ".claude/settings.json に PreToolUse hook が登録され、hook スクリプトが primary worktree 判定を含み、ブロック/許可の両方が動作する",
+        "*.test.md テスト仕様表が存在し、PRD §番号またはテスト関数名を備考に持つ実エントリがあり、エントリが実在するテストと一致する",
+        "CI 設定が存在し、警告をエラー扱いにする lint、format チェック、テスト実行を含む",
+        "npm エコシステムに適合したリリース自動化（コミット規約からの bump + リリース PR + 手動 publish ゲート）が設定または文書化されている",
+        "package.json と tsconfig.json が存在し、npm ライブラリとして妥当な構成になっている",
+        "生成された文書に <...> プレースホルダや未記入 TODO が残っていない（明示的な「要確認」マークは除く）"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "社内向けに、Markdown ドキュメントのリンク切れを検査する Python 製の CLI ツールを作りたい。リポジトリ内の .md を全部走査して dead link をレポートする感じ。/tmp/eval-linkcheck に新規リポジトリを立ち上げて。",
+      "expected_output": "「エージェント体制」と明示されていなくても、継続開発するプロダクトとして PRD・CLAUDE.md・テスト仕様・CI・リリースフロー・hook が Python エコシステムに適合した形で揃ったリポジトリ",
+      "files": [],
+      "assertions": [
+        "docs/PRD.md が存在し、§番号付きセクションがあり、絶対条件が検証可能な禁止/保証の形で3個以上列挙されている",
+        "PRD に優先順位付き KPI があり、数値目標と hard/soft の分類が明記されている",
+        "CLAUDE.md が存在し、絶対条件・KPI 優先順位・作業前チェックリスト・「PRD が正」の明記を含む",
+        "CLAUDE.md またはリリース文書に Conventional Commits 規約と prefix→bump の対応表がある",
+        ".claude/settings.json に PreToolUse hook が登録され、hook スクリプトが primary worktree 判定を含み、ブロック/許可の両方が動作する",
+        "*.test.md テスト仕様表が存在し、PRD §番号またはテスト関数名を備考に持つ実エントリがあり、エントリが実在するテストと一致する",
+        "CI 設定が存在し、警告をエラー扱いにする lint、format チェック、テスト実行を含む",
+        "Python エコシステムに適合したリリースフロー（コミット規約からの bump + リリース PR + 手動 publish ゲート、社内ツールなら配布手順）が設定または文書化されている",
+        "pyproject.toml が存在し、Python CLI として妥当に初期化され、テストが実際に通る",
+        "ユーザーに確認できない前提のため、絶対条件・KPI の草案に「要確認」の明示がある（PRD 内マークまたは report での明示）"
+      ]
+    }
+  ],
+  "benchmark_history": [
+    {
+      "iteration": 1,
+      "date": "2026-06-10",
+      "with_skill_pass_rate": 0.967,
+      "without_skill_pass_rate": 0.167,
+      "note": "唯一の with-skill 失敗は eval-2 の lockfile 文言（新規 npm リポジトリでは lockfile 未生成でありアサーション側の問題）。本履歴の iteration-1 をもってアサーションを上記に較正済み（hook 許可側検証・テスト実走を追加、lockfile 文言を条件付きに緩和）"
+    }
+  ]
+}
